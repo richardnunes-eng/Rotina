@@ -2212,41 +2212,7 @@
   // ============================================
   // INITIALIZATION
   // ============================================
-
-  // Verificar se estamos em iframe restrito
-  try {
-    if (window.self !== window.top) {
-      // Em iframe, tentar acessar window.top
-      const testAccess = window.top.location.href; // Vai dar erro se CSP bloquear
-      console.log('Em iframe, mas com acesso ao parent');
-      window.top.location.href = window.location.href;
-    }
-  } catch (e) {
-    // CSP bloqueou acesso ao parent
-    console.warn('Detectado iframe com CSP restritivo:', e);
-    const appContainer = document.getElementById('app');
-    const loadingScreen = document.getElementById('loading-screen');
-
-    if (loadingScreen) loadingScreen.style.display = 'none';
-    if (appContainer) {
-      appContainer.style.display = 'flex';
-      appContainer.innerHTML = `
-        <div style="padding: 40px; text-align: center; margin: auto; max-width: 500px;">
-          <span class="material-icons" style="font-size: 64px; color: var(--accent-orange); margin-bottom: 20px;">warning</span>
-          <h2 style="color: var(--text-primary); margin-bottom: 12px;">App executando em iframe restrito</h2>
-          <p style="color: var(--text-secondary); margin-bottom: 24px;">
-            Por motivos de segurança (CSP), este app precisa ser aberto em uma nova aba.
-          </p>
-          <button class="btn btn-primary" onclick="window.open(window.location.href, '_blank')">
-            <span class="material-icons">open_in_new</span>
-            Abrir em nova aba
-          </button>
-        </div>
-      `;
-    }
-  }
-
-  // Verificação defensiva de autenticação
+\n  // Verificação defensiva de autenticação
   async function checkAuth() {
     try {
       const sessionInfo = await api.call('getSessionInfo');
@@ -2397,3 +2363,4 @@
 
 })();
 </script>
+

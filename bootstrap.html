@@ -122,31 +122,8 @@
     const WEB_APP_URL = '<?= ScriptApp.getService().getUrl() ?>';
 
     function forceRedirect() {
-      console.log('Forçando redirecionamento para:', WEB_APP_URL);
-
-      // Estratégia 1: Tentar abrir no window.top (sair do iframe)
-      try {
-        if (window.self !== window.top) {
-          console.log('Detectado iframe, tentando window.top.location');
-          window.top.location.href = WEB_APP_URL;
-          return;
-        }
-      } catch (e) {
-        console.warn('Não conseguiu acessar window.top (CORS):', e);
-      }
-
-      // Estratégia 2: Se não estiver em iframe ou falhou acima, recarregar direto
-      try {
-        console.log('Redirecionando window.location');
-        window.location.href = WEB_APP_URL;
-        return;
-      } catch (e) {
-        console.warn('Erro ao redirecionar window.location:', e);
-      }
-
-      // Estratégia 3: Fallback - abrir em nova aba
-      console.log('Fallback: abrindo em nova aba');
-      window.open(WEB_APP_URL, '_blank', 'noopener,noreferrer');
+      console.log('Redirecionando para:', WEB_APP_URL);
+      window.location.href = WEB_APP_URL;
     }
 
     // Executar automaticamente após 500ms
@@ -159,3 +136,5 @@
   </script>
 </body>
 </html>
+
+

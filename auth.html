@@ -223,18 +223,8 @@
 
   <script>
     function handleGoogleLogin() {
-      // Se estivermos em iframe, tentar abrir em nova aba
-      if (window.self !== window.top) {
-        try {
-          window.top.location.href = '<?= ScriptApp.getService().getUrl() ?>';
-        } catch (e) {
-          // Se não conseguir acessar window.top (cross-origin), abrir em nova aba
-          window.open('<?= ScriptApp.getService().getUrl() ?>', '_blank');
-        }
-      } else {
-        // Recarregar a página com parâmetro authuser para forçar seleção de conta
-        window.location.href = '<?= ScriptApp.getService().getUrl() ?>?authuser=0';
-      }
+      // Redireciona direto para usar a conta Google j� autenticada
+      window.location.href = '<?= ScriptApp.getService().getUrl() ?>';
     }
 
     function toggleHelp() {
@@ -244,3 +234,5 @@
   </script>
 </body>
 </html>
+
+
