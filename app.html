@@ -10,6 +10,9 @@
 // ADICIONAR LOGO APÓS (function() { 'use strict';
 // ============================================
 
+  // Set to your Web App deployment URL (Deploy -> Manage deployments -> Web app URL)
+  const WEBAPP_URL = '';
+
 const diagnostics = {
   lastCall: null,
   lastResponse: null,
@@ -141,49 +144,42 @@ window.diagnostics = diagnostics;
 window.callServer = callServer;
 
   const frameGuard = {
+    getWebAppUrl: function() {
+      return (WEBAPP_URL || '').trim();
+    },
     isFramed: function() {
       return window.top !== window.self;
     },
-    show: function() {
-      const overlay = document.createElement('div');
-      overlay.className = 'modal-overlay';
-      overlay.innerHTML = `
-        <div class="modal" style="max-width: 520px">
-          <div class="modal-header">
-            <h2 class="modal-title">Abrir em nova aba</h2>
-          </div>
-          <div class="modal-body">
-            <p>Este app nao pode ser exibido dentro de iframe por politica de seguranca do Google.</p>
-            <p>Para continuar, abra em uma nova aba.</p>
-          </div>
-          <div class="modal-footer">
-            <button class="btn btn-secondary" id="frame-guard-copy">Copiar link</button>
-            <button class="btn btn-primary" id="frame-guard-open">Abrir</button>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(overlay);
+    showMissingUrl: function() {
+      const msg = 'WEBAPP_URL vazio. Defina a URL do Web App (Deploy -> Manage deployments -> Web app URL).';
+      console.error(msg);
+      alert(msg);
 
-      const url = window.location.href;
-      const openBtn = overlay.querySelector('#frame-guard-open');
-      const copyBtn = overlay.querySelector('#frame-guard-copy');
-
-      openBtn.addEventListener('click', () => {
-        const opened = window.open(url, '_blank', 'noopener,noreferrer');
-        if (!opened) {
-          alert('Popup bloqueado. Permita popups e tente novamente.');
-        }
-      });
-
-      copyBtn.addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(url);
-          alert('Link copiado.');
-        } catch (err) {
-          console.error('Falha ao copiar link:', err);
-          alert('Nao foi possivel copiar. Copie manualmente da barra de endereco.');
-        }
-      });
+      const loading = document.getElementById('loading-screen');
+      if (loading) {
+        loading.innerHTML = `<div style="max-width: 520px; text-align: center;">
+          <h2>Configure o Web App URL</h2>
+          <p>Defina a constante WEBAPP_URL no arquivo app.html com a URL do deployment.</p>
+          <p>Exemplo: https://script.google.com/macros/s/SEU_ID/exec</p>
+        </div>`;
+        loading.style.display = 'flex';
+      }
+    },
+    redirectOutOfFrame: function() {
+      const url = this.getWebAppUrl();
+      if (!url) {
+        this.showMissingUrl();
+        return false;
+      }
+      console.warn('App carregado dentro de iframe. Redirecionando para o Web App.');
+      alert('Redirecionando para o Web App fora do iframe.');
+      try {
+        window.top.location = url;
+      } catch (err) {
+        console.error('Falha ao redirecionar para o Web App:', err);
+        alert('Falha ao redirecionar. Abra o Web App URL manualmente.');
+      }
+      return true;
     }
   };
 
@@ -2150,9 +2146,12 @@ window.callServer = callServer;
 
   async function init() {
     try {
+      if (!frameGuard.getWebAppUrl()) {
+        console.warn('WEBAPP_URL vazio. Defina a URL do Web App para evitar problemas de iframe.');
+      }
+
       if (frameGuard.isFramed()) {
-        console.warn('App carregado dentro de iframe. Solicite abertura em nova aba.');
-        frameGuard.show();
+        frameGuard.redirectOutOfFrame();
         return;
       }
 
@@ -2164,6 +2163,10 @@ window.callServer = callServer;
       
       // Aplicar tema
       theme.init();
+
+      if (!frameGuard.getWebAppUrl()) {
+        toast.error('WEBAPP_URL vazio. Configure a URL do Web App em app.html.');
+      }
       
       // Tentar carregar cache
       const cachedState = storage.load('appCache');
