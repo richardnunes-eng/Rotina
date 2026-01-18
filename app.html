@@ -2123,6 +2123,20 @@ window.callServer = callServer;
       <div class="card" style="max-width: 480px; margin: 0 auto; text-align: left;">
         <h2 class="mb-sm">Entrar ou criar conta</h2>
         <p class="text-muted mb-lg">Use seu e-mail e senha para acessar o app.</p>
+        <div class="card mb-md" style="background: var(--surface-2);">
+          <h3 class="mb-xs" style="margin-top: 0;">Conta Google</h3>
+          <p class="text-muted mb-sm">Escolha o indice da conta para evitar erro de varias contas.</p>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
+            <button data-authuser="0" class="btn btn-secondary authuser-btn">Conta 0</button>
+            <button data-authuser="1" class="btn btn-secondary authuser-btn">Conta 1</button>
+            <button data-authuser="2" class="btn btn-secondary authuser-btn">Conta 2</button>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <input id="authuser-input" type="number" min="0" step="1" class="form-input" placeholder="Outro indice (ex: 3)">
+            <button id="authuser-apply" class="btn btn-secondary">Usar</button>
+          </div>
+          <p id="authuser-status" style="margin-top: 8px; color: #d32f2f;"></p>
+        </div>
         <div class="form-group">
           <label class="form-label">E-mail</label>
           <input id="auth-email" type="email" class="form-input" placeholder="voce@exemplo.com">
@@ -2145,6 +2159,27 @@ window.callServer = callServer;
     const loginBtn = loading.querySelector('#auth-login');
     const registerBtn = loading.querySelector('#auth-register');
     const status = loading.querySelector('#auth-status');
+    const authUserStatus = loading.querySelector('#authuser-status');
+    const authUserButtons = loading.querySelectorAll('.authuser-btn');
+    const authUserInput = loading.querySelector('#authuser-input');
+    const authUserApply = loading.querySelector('#authuser-apply');
+
+    function navigateWithAuthUser(value) {
+      const authUser = String(value).trim();
+      if (!/^\d+$/.test(authUser)) {
+        authUserStatus.textContent = 'Informe um indice valido.';
+        return;
+      }
+      const url = new URL(window.location.href);
+      url.searchParams.set('authuser', authUser);
+      window.location.href = url.toString();
+    }
+
+    authUserButtons.forEach(btn => {
+      btn.addEventListener('click', () => navigateWithAuthUser(btn.dataset.authuser));
+    });
+
+    authUserApply.addEventListener('click', () => navigateWithAuthUser(authUserInput.value));
 
     function validateInput() {
       const email = (emailEl.value || '').trim().toLowerCase();
