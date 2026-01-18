@@ -1,4 +1,4 @@
-// ============================================
+﻿// ============================================
 // ROUTINE APP - Google Apps Script Backend
 // VERSÃO 2.0 - Com Calendar Sync e Recorrência
 // ============================================
@@ -91,42 +91,71 @@ function ping() {
   });
 }
 
-function getWebAppUrl() {
-  try {
-    const serviceUrl = ScriptApp.getService().getUrl();
-    if (serviceUrl) return serviceUrl;
-  } catch (e) {
-    Logger.log('ScriptApp.getService().getUrl() falhou: ' + e.toString());
+function ensureAuthSheet() {
+  const ss = getOrCreateSpreadsheet();
+  let sheet = ss.getSheetByName('AUTH_USERS');
+  if (!sheet) {
+    sheet = ss.insertSheet('AUTH_USERS');
+    sheet.getRange(1, 1, 1, 5).setValues([['email', 'passwordHash', 'salt', 'createdAt', 'lastLoginAt']]);
+    sheet.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#4285f4').setFontColor('#ffffff');
+    sheet.setFrozenRows(1);
   }
-
-  const deploymentId = PropertiesService.getScriptProperties().getProperty('WEBAPP_DEPLOYMENT_ID');
-  if (deploymentId) {
-    return 'https://script.google.com/macros/s/' + deploymentId + '/exec';
-  }
-
-  return '';
+  return sheet;
 }
 
-function saveDeploymentId(deploymentId) {
-  return safeExecute('saveDeploymentId', () => {
-    const trimmed = (deploymentId || '').trim();
-    if (!trimmed) {
-      return { ok: false, error: 'Deployment ID vazio.' };
+function hashPassword(password, salt) {
+  const combined = salt + ':' + password;
+  const raw = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, combined, Utilities.Charset.UTF_8);
+  return Utilities.base64Encode(raw);
+}
+
+function findAuthUser(email) {
+  const sheet = ensureAuthSheet();
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).toLowerCase() === email.toLowerCase()) {
+      return { row: i + 1, email: data[i][0], passwordHash: data[i][1], salt: data[i][2] };
     }
-    PropertiesService.getScriptProperties().setProperty('WEBAPP_DEPLOYMENT_ID', trimmed);
-    return { ok: true, data: { webAppUrl: getWebAppUrl() } };
+  }
+  return null;
+}
+
+function registerUser(email, password) {
+  return safeExecute('registerUser', () => {
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const cleanPassword = String(password || '');
+    if (!cleanEmail || !cleanPassword) {
+      return { ok: false, error: 'E-mail e senha sao obrigatorios.' };
+    }
+    if (findAuthUser(cleanEmail)) {
+      return { ok: false, error: 'E-mail ja cadastrado.' };
+    }
+    const salt = Utilities.getUuid();
+    const passwordHash = hashPassword(cleanPassword, salt);
+    const sheet = ensureAuthSheet();
+    sheet.appendRow([cleanEmail, passwordHash, salt, new Date().toISOString(), '']);
+    return { ok: true, data: { email: cleanEmail } };
   });
 }
 
-function apiGetConfig() {
-  return safeExecute('apiGetConfig', () => {
-    return {
-      ok: true,
-      data: {
-        webAppUrl: getWebAppUrl(),
-        version: '2.0-FIXED'
-      }
-    };
+function loginUser(email, password) {
+  return safeExecute('loginUser', () => {
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const cleanPassword = String(password || '');
+    if (!cleanEmail || !cleanPassword) {
+      return { ok: false, error: 'E-mail e senha sao obrigatorios.' };
+    }
+    const user = findAuthUser(cleanEmail);
+    if (!user) {
+      return { ok: false, error: 'Usuario ou senha invalidos.' };
+    }
+    const expectedHash = hashPassword(cleanPassword, user.salt);
+    if (expectedHash !== user.passwordHash) {
+      return { ok: false, error: 'Usuario ou senha invalidos.' };
+    }
+    const sheet = ensureAuthSheet();
+    sheet.getRange(user.row, 5).setValue(new Date().toISOString());
+    return { ok: true, data: { email: cleanEmail } };
   });
 }
 
@@ -165,9 +194,7 @@ function initializeDatabase() {
     'TASK_CHECKLIST': ['id', 'taskId', 'userKey', 'text', 'done', 'createdAt'],
     'GOALS': ['id', 'userKey', 'title', 'metric', 'targetValue', 'currentValue', 'dueDate', 'status', 'createdAt', 'updatedAt'],
     'GOAL_LOG': ['id', 'goalId', 'userKey', 'deltaValue', 'note', 'date', 'createdAt'],
-    'JOURNAL': ['id', 'userKey', 'date', 'mood', 'energy', 'note', 'gratitude', 'createdAt', 'updatedAt'],
-    'SETTINGS': ['userKey', 'calendarId', 'enableSync', 'defaultEventDurationMin', 'timezone', 'lastSyncAt', 'syncDirection', 'allowImportAll', 'defaultEventHour', 'createdAt', 'updatedAt'],
-    'SYNC_LOG': ['id', 'userKey', 'direction', 'entityType', 'entityId', 'calendarEventId', 'status', 'message', 'timestamp']
+    'JOURNAL': ['id', 'userKey', 'date', 'mood', 'energy', 'note', 'gratitude', 'createdAt', 'updatedAt']
   };
   
   Object.keys(sheets).forEach(sheetName => {
@@ -279,524 +306,10 @@ function deleteRecord(sheetName, id) {
 }
 
 // ============================================
-// CALENDAR SETTINGS
-// ============================================
-
-function getCalendarSettings(userKey) {
-  try {
-    const settings = findRecords('SETTINGS', { userKey: userKey });
-    
-    if (settings.length > 0) {
-      return { ok: true, data: settings[0] };
-    } else {
-      // Criar configurações padrão
-      const defaultSettings = {
-        userKey: userKey,
-        calendarId: 'primary',
-        enableSync: false,
-        defaultEventDurationMin: 60,
-        timezone: Session.getScriptTimeZone(),
-        lastSyncAt: '',
-        syncDirection: 'BOTH',
-        allowImportAll: false,
-        defaultEventHour: '09:00',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      
-      createRecord('SETTINGS', defaultSettings);
-      return { ok: true, data: defaultSettings };
-    }
-  } catch (error) {
-    return { ok: false, error: error.toString() };
-  }
-}
-
-function updateCalendarSettings(userKey, updates) {
-  try {
-    const settings = findRecords('SETTINGS', { userKey: userKey });
-    
-    const updateData = {
-      ...updates,
-      updatedAt: new Date().toISOString()
-    };
-    
-    if (settings.length > 0) {
-      // Atualizar usando userKey como identificador
-      const ss = getOrCreateSpreadsheet();
-      const sheet = ss.getSheetByName('SETTINGS');
-      const data = sheet.getDataRange().getValues();
-      const headers = data[0];
-      const userKeyCol = headers.indexOf('userKey');
-      
-      for (let i = 1; i < data.length; i++) {
-        if (data[i][userKeyCol] === userKey) {
-          for (let key in updateData) {
-            const colIndex = headers.indexOf(key);
-            if (colIndex !== -1) {
-              sheet.getRange(i + 1, colIndex + 1).setValue(updateData[key]);
-            }
-          }
-          break;
-        }
-      }
-      
-      return { ok: true, data: updateData };
-    } else {
-      // Criar novo
-      const newSettings = {
-        userKey: userKey,
-        calendarId: updates.calendarId || 'primary',
-        enableSync: updates.enableSync || false,
-        defaultEventDurationMin: updates.defaultEventDurationMin || 60,
-        timezone: updates.timezone || Session.getScriptTimeZone(),
-        lastSyncAt: '',
-        syncDirection: updates.syncDirection || 'BOTH',
-        allowImportAll: updates.allowImportAll || false,
-        defaultEventHour: updates.defaultEventHour || '09:00',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      
-      createRecord('SETTINGS', newSettings);
-      return { ok: true, data: newSettings };
-    }
-  } catch (error) {
-    return { ok: false, error: error.toString() };
-  }
-}
-
-// ============================================
-// CALENDAR SYNC - HELPERS
-// ============================================
-
-function logSync(userKey, direction, entityType, entityId, calendarEventId, status, message) {
-  try {
-    createRecord('SYNC_LOG', {
-      id: Utilities.getUuid(),
-      userKey: userKey,
-      direction: direction,
-      entityType: entityType,
-      entityId: entityId || '',
-      calendarEventId: calendarEventId || '',
-      status: status,
-      message: message || '',
-      timestamp: new Date().toISOString()
-    });
-  } catch (e) {
-    Logger.log('Erro ao registrar log: ' + e.toString());
-  }
-}
-
-// Converte data/hora para Date object
-function parseDateTime(dateStr, timeStr, timezone) {
-  if (!dateStr) return null;
-  
-  try {
-    if (timeStr) {
-      // Data + hora
-      const [hours, minutes] = timeStr.split(':');
-      const dateTime = new Date(dateStr + 'T' + timeStr + ':00');
-      return dateTime;
-    } else {
-      // Apenas data
-      return new Date(dateStr);
-    }
-  } catch (e) {
-    Logger.log('Erro ao parsear data/hora: ' + e.toString());
-    return null;
-  }
-}
-
-// ============================================
-// CALENDAR SYNC - EXPORT
-// ============================================
-
-function exportTaskToCalendar(userKey, taskId) {
-  try {
-    const settingsResult = getCalendarSettings(userKey);
-    if (!settingsResult.ok) {
-      return { ok: false, error: 'Erro ao obter configurações' };
-    }
-    
-    const settings = settingsResult.data;
-    if (!settings.enableSync) {
-      return { ok: false, error: 'Sincronização não está habilitada' };
-    }
-    
-    const tasks = findRecords('TASKS', { id: taskId, userKey: userKey });
-    if (tasks.length === 0) {
-      return { ok: false, error: 'Tarefa não encontrada' };
-    }
-    
-    const task = tasks[0];
-    const calendar = CalendarApp.getCalendarById(settings.calendarId);
-    
-    if (!calendar) {
-      return { ok: false, error: 'Calendário não encontrado' };
-    }
-    
-    // Preparar dados do evento
-    const eventTitle = '[Tarefa] ' + task.title;
-    let eventDescription = 'ID: ' + task.id + '\n';
-    eventDescription += 'Prioridade: ' + (task.priority || 'normal') + '\n';
-    if (task.description) {
-      eventDescription += '\n' + task.description;
-    }
-    eventDescription += '\n\n[ROUTINE_APP_SYNC]';
-    
-    let event;
-    
-    // Determinar se é all-day ou com horário
-    if (task.dueTime) {
-      // Evento com horário
-      const startDate = parseDateTime(task.dueDate, task.dueTime, settings.timezone);
-      const endDate = new Date(startDate.getTime() + settings.defaultEventDurationMin * 60000);
-      
-      if (task.calendarEventId) {
-        // Atualizar evento existente
-        try {
-          event = calendar.getEventById(task.calendarEventId);
-          if (event) {
-            event.setTitle(eventTitle);
-            event.setDescription(eventDescription);
-            event.setTime(startDate, endDate);
-          } else {
-            // Evento não encontrado, criar novo
-            event = calendar.createEvent(eventTitle, startDate, endDate, { description: eventDescription });
-          }
-        } catch (e) {
-          // Criar novo se houver erro
-          event = calendar.createEvent(eventTitle, startDate, endDate, { description: eventDescription });
-        }
-      } else {
-        // Criar novo evento
-        event = calendar.createEvent(eventTitle, startDate, endDate, { description: eventDescription });
-      }
-    } else if (task.dueDate) {
-      // Evento all-day
-      const date = new Date(task.dueDate);
-      
-      if (task.calendarEventId) {
-        // Atualizar evento existente
-        try {
-          event = calendar.getEventById(task.calendarEventId);
-          if (event) {
-            event.setTitle(eventTitle);
-            event.setDescription(eventDescription);
-            event.setAllDayDate(date);
-          } else {
-            event = calendar.createAllDayEvent(eventTitle, date, { description: eventDescription });
-          }
-        } catch (e) {
-          event = calendar.createAllDayEvent(eventTitle, date, { description: eventDescription });
-        }
-      } else {
-        event = calendar.createAllDayEvent(eventTitle, date, { description: eventDescription });
-      }
-    } else {
-      return { ok: false, error: 'Tarefa sem data definida' };
-    }
-    
-    // Atualizar tarefa com eventId
-    updateRecord('TASKS', taskId, {
-      calendarEventId: event.getId(),
-      calendarUpdatedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    });
-    
-    logSync(userKey, 'EXPORT', 'TASK', taskId, event.getId(), 'SUCCESS', 'Tarefa exportada');
-    
-    return { ok: true, data: { eventId: event.getId(), eventLink: event.getHtmlLink() } };
-    
-  } catch (error) {
-    logSync(userKey, 'EXPORT', 'TASK', taskId, '', 'ERROR', error.toString());
-    return { ok: false, error: error.toString() };
-  }
-}
-
-function unlinkTaskFromCalendar(userKey, taskId) {
-  try {
-    const tasks = findRecords('TASKS', { id: taskId, userKey: userKey });
-    if (tasks.length === 0) {
-      return { ok: false, error: 'Tarefa não encontrada' };
-    }
-    
-    updateRecord('TASKS', taskId, {
-      calendarEventId: '',
-      calendarUpdatedAt: '',
-      updatedAt: new Date().toISOString()
-    });
-    
-    logSync(userKey, 'UNLINK', 'TASK', taskId, '', 'SUCCESS', 'Tarefa desvinculada');
-    
-    return { ok: true, data: { id: taskId } };
-  } catch (error) {
-    return { ok: false, error: error.toString() };
-  }
-}
-
-// ============================================
-// CALENDAR SYNC - IMPORT
-// ============================================
-
-function importCalendarEvents(userKey, options) {
-  try {
-    const settingsResult = getCalendarSettings(userKey);
-    if (!settingsResult.ok) {
-      return { ok: false, error: 'Erro ao obter configurações' };
-    }
-    
-    const settings = settingsResult.data;
-    if (!settings.enableSync) {
-      return { ok: false, error: 'Sincronização não está habilitada' };
-    }
-    
-    const calendar = CalendarApp.getCalendarById(settings.calendarId);
-    if (!calendar) {
-      return { ok: false, error: 'Calendário não encontrado' };
-    }
-    
-    const rangeDaysPast = options.rangeDaysPast || 7;
-    const rangeDaysFuture = options.rangeDaysFuture || 30;
-    
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - rangeDaysPast);
-    const endDate = new Date();
-    endDate.setDate(endDate.getDate() + rangeDaysFuture);
-    
-    const events = calendar.getEvents(startDate, endDate);
-    
-    let imported = 0;
-    let updated = 0;
-    let skipped = 0;
-    
-    events.forEach(event => {
-      try {
-        const description = event.getDescription() || '';
-        const hasMarker = description.includes('[ROUTINE_APP_SYNC]');
-        
-        // Verificar se deve importar
-        if (!hasMarker && !settings.allowImportAll) {
-          skipped++;
-          return;
-        }
-        
-        // Verificar se já existe tarefa vinculada
-        const existingTasks = findRecords('TASKS', { calendarEventId: event.getId(), userKey: userKey });
-        
-        let title = event.getTitle();
-        // Remover prefixo se existir
-        title = title.replace('[Tarefa] ', '');
-        
-        const startTime = event.getStartTime();
-        const allDay = event.isAllDayEvent();
-        
-        const taskData = {
-          title: title,
-          description: event.getDescription().replace('[ROUTINE_APP_SYNC]', '').trim(),
-          dueDate: Utilities.formatDate(startTime, settings.timezone, 'yyyy-MM-dd'),
-          dueTime: allDay ? '' : Utilities.formatDate(startTime, settings.timezone, 'HH:mm'),
-          calendarEventId: event.getId(),
-          calendarUpdatedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        
-        if (existingTasks.length > 0) {
-          // Atualizar tarefa existente
-          updateRecord('TASKS', existingTasks[0].id, taskData);
-          updated++;
-          logSync(userKey, 'IMPORT', 'TASK', existingTasks[0].id, event.getId(), 'SUCCESS', 'Tarefa atualizada');
-        } else {
-          // Criar nova tarefa
-          const newTask = {
-            id: Utilities.getUuid(),
-            userKey: userKey,
-            ...taskData,
-            priority: 'normal',
-            status: 'open',
-            tagsJson: '[]',
-            isRecurring: false,
-            recurrenceType: '',
-            recurrenceDays: '',
-            recurrenceTime: '',
-            recurrenceStartDate: '',
-            recurrenceEndDate: '',
-            recurrenceNextRun: '',
-            templateTaskId: '',
-            createdAt: new Date().toISOString()
-          };
-          
-          createRecord('TASKS', newTask);
-          imported++;
-          logSync(userKey, 'IMPORT', 'TASK', newTask.id, event.getId(), 'SUCCESS', 'Nova tarefa criada');
-        }
-      } catch (e) {
-        Logger.log('Erro ao importar evento: ' + e.toString());
-        logSync(userKey, 'IMPORT', 'EVENT', '', event.getId(), 'ERROR', e.toString());
-      }
-    });
-    
-    return { 
-      ok: true, 
-      data: { 
-        imported: imported, 
-        updated: updated, 
-        skipped: skipped,
-        total: events.length
-      } 
-    };
-    
-  } catch (error) {
-    logSync(userKey, 'IMPORT', '', '', '', 'ERROR', error.toString());
-    return { ok: false, error: error.toString() };
-  }
-}
-
-// ============================================
-// CALENDAR SYNC - BIDIRECTIONAL
-// ============================================
-
-function syncCalendar(userKey, options) {
-  try {
-    const mode = options.mode || 'BOTH';
-    const rangeDaysPast = options.rangeDaysPast || 7;
-    const rangeDaysFuture = options.rangeDaysFuture || 30;
-    
-    let exportResult, importResult;
-    
-    if (mode === 'EXPORT_ONLY' || mode === 'BOTH') {
-      // Exportar tarefas vinculadas
-      const tasks = findRecords('TASKS', { userKey: userKey });
-      let exported = 0;
-      
-      tasks.forEach(task => {
-        if (task.dueDate && (task.calendarEventId || task.status !== 'completed')) {
-          const result = exportTaskToCalendar(userKey, task.id);
-          if (result.ok) exported++;
-        }
-      });
-      
-      exportResult = { exported: exported };
-    }
-    
-    if (mode === 'IMPORT_ONLY' || mode === 'BOTH') {
-      importResult = importCalendarEvents(userKey, { rangeDaysPast, rangeDaysFuture });
-    }
-    
-    // Atualizar lastSyncAt
-    updateCalendarSettings(userKey, {
-      lastSyncAt: new Date().toISOString()
-    });
-    
-    return {
-      ok: true,
-      data: {
-        export: exportResult,
-        import: importResult ? importResult.data : null
-      }
-    };
-    
-  } catch (error) {
-    return { ok: false, error: error.toString() };
-  }
-}
-
-// ============================================
-// TAREFAS RECORRENTES
-// ============================================
-
-function generateRecurringTasks(userKey, options) {
-  try {
-    const daysAhead = options.daysAhead || 14;
-    
-    // Buscar tarefas template (recorrentes)
-    const allTasks = findRecords('TASKS', { userKey: userKey });
-    const templates = allTasks.filter(t => t.isRecurring && t.recurrenceType === 'WEEKLY');
-    
-    let generated = 0;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    templates.forEach(template => {
-      try {
-        // Parse recurrence days
-        const recurrenceDays = template.recurrenceDays ? JSON.parse(template.recurrenceDays) : [];
-        if (recurrenceDays.length === 0) return;
-        
-        const startDate = template.recurrenceStartDate ? new Date(template.recurrenceStartDate) : today;
-        const endDate = template.recurrenceEndDate ? new Date(template.recurrenceEndDate) : new Date(today.getTime() + daysAhead * 24 * 60 * 60 * 1000);
-        
-        // Gerar instâncias para cada dia
-        for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-          const dayOfWeek = d.getDay() === 0 ? 7 : d.getDay(); // 1=Seg, 7=Dom
-          
-          if (recurrenceDays.includes(dayOfWeek)) {
-            const dateStr = Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-            
-            // Verificar se já existe instância para esta data
-            const existing = allTasks.filter(t => 
-              t.templateTaskId === template.id && 
-              t.dueDate === dateStr
-            );
-            
-            if (existing.length === 0) {
-              // Criar nova instância
-              const instance = {
-                id: Utilities.getUuid(),
-                userKey: userKey,
-                title: template.title,
-                description: template.description,
-                priority: template.priority,
-                dueDate: dateStr,
-                dueTime: template.recurrenceTime || '',
-                status: 'open',
-                tagsJson: template.tagsJson,
-                calendarEventId: '',
-                calendarUpdatedAt: '',
-                isRecurring: false, // Instância não é recorrente
-                recurrenceType: '',
-                recurrenceDays: '',
-                recurrenceTime: '',
-                recurrenceStartDate: '',
-                recurrenceEndDate: '',
-                recurrenceNextRun: '',
-                templateTaskId: template.id, // Referência ao template
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString()
-              };
-              
-              createRecord('TASKS', instance);
-              generated++;
-            }
-          }
-        }
-      } catch (e) {
-        Logger.log('Erro ao gerar recorrências para template ' + template.id + ': ' + e.toString());
-      }
-    });
-    
-    return { ok: true, data: { generated: generated } };
-    
-  } catch (error) {
-    return { ok: false, error: error.toString() };
-  }
-}
-
-// ============================================
 // ENDPOINTS DA API
 // ============================================
 
 function doGet() {
-  const webAppUrl = getWebAppUrl();
-  if (!webAppUrl) {
-    return HtmlService.createTemplateFromFile('setup')
-      .evaluate()
-      .setTitle('Routine App - Setup')
-      .addMetaTag('viewport', 'width=device-width, initial-scale=1')
-      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-  }
-
   return HtmlService.createTemplateFromFile('index')
     .evaluate()
     .setTitle('Routine App v2')
@@ -840,9 +353,6 @@ function initApp(providedUserKey) {
     const goals = findRecords('GOALS', { userKey: userKey });
     const goalLogs = findRecords('GOAL_LOG', { userKey: userKey });
     const journals = findRecords('JOURNAL', { userKey: userKey });
-    const settingsResult = getCalendarSettings(userKey);
-    const settings = settingsResult.ok ? settingsResult.data : null;
-    
     return {
       ok: true,
       data: {
@@ -853,8 +363,7 @@ function initApp(providedUserKey) {
         taskChecklists: taskChecklists,
         goals: goals,
         goalLogs: goalLogs,
-        journals: journals,
-        settings: settings
+        journals: journals
       }
     };
 const response = {
@@ -867,8 +376,7 @@ const response = {
         taskChecklists: taskChecklists || [],
         goals: goals || [],
         goalLogs: goalLogs || [],
-        journals: journals || [],
-        settings: settings
+        journals: journals || []
       }
     };
     
@@ -1342,3 +850,4 @@ function exportUserData(userKey, format) {
     return { ok: false, error: error.toString() };
   }
 }
+
