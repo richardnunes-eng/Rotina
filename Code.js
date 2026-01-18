@@ -465,6 +465,46 @@ function generateRecurringTasks(userKey, options) {
 // ============================================
 
 function doGet() {
+  // Verificar se o usuário está autenticado
+  const userEmail = Session.getActiveUser().getEmail();
+
+  // Se não houver email, significa que não está autenticado
+  // Retornar página que força login
+  if (!userEmail) {
+    return HtmlService.createHtmlOutput(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>THX Ops - Login Required</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+      </head>
+      <body>
+        <div style="display: flex; align-items: center; justify-content: center; min-height: 100vh; font-family: Arial, sans-serif; background: #f5f5f5;">
+          <div style="text-align: center; padding: 40px; background: white; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 400px;">
+            <h1 style="color: #1a73e8; margin-bottom: 20px;">🔒 Autenticação Necessária</h1>
+            <p style="color: #666; margin-bottom: 30px;">
+              Para acessar o THX Ops, você precisa fazer login com sua conta Google.
+            </p>
+            <p style="color: #999; font-size: 14px;">
+              Este aplicativo requer permissões para acessar seus dados do Google Sheets.
+              Por favor, reimplante o aplicativo com as configurações corretas de autenticação.
+            </p>
+            <div style="margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+              <p style="font-size: 13px; color: #666; margin: 0;">
+                <strong>Como configurar:</strong><br>
+                1. Vá em Implantar > Nova implantação<br>
+                2. Executar como: Eu (${Session.getEffectiveUser().getEmail()})<br>
+                3. Quem tem acesso: Somente eu ou Qualquer pessoa
+              </p>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `).setTitle('THX Ops - Login Required');
+  }
+
+  // Se autenticado, mostrar o app normal
   return HtmlService.createTemplateFromFile('index')
     .evaluate()
     .setTitle('THX Ops')
