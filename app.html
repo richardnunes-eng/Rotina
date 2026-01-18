@@ -140,6 +140,53 @@ window.showDiagnostics = function() {
 window.diagnostics = diagnostics;
 window.callServer = callServer;
 
+  const frameGuard = {
+    isFramed: function() {
+      return window.top !== window.self;
+    },
+    show: function() {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.innerHTML = `
+        <div class="modal" style="max-width: 520px">
+          <div class="modal-header">
+            <h2 class="modal-title">Abrir em nova aba</h2>
+          </div>
+          <div class="modal-body">
+            <p>Este app nao pode ser exibido dentro de iframe por politica de seguranca do Google.</p>
+            <p>Para continuar, abra em uma nova aba.</p>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" id="frame-guard-copy">Copiar link</button>
+            <button class="btn btn-primary" id="frame-guard-open">Abrir</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+
+      const url = window.location.href;
+      const openBtn = overlay.querySelector('#frame-guard-open');
+      const copyBtn = overlay.querySelector('#frame-guard-copy');
+
+      openBtn.addEventListener('click', () => {
+        const opened = window.open(url, '_blank', 'noopener,noreferrer');
+        if (!opened) {
+          alert('Popup bloqueado. Permita popups e tente novamente.');
+        }
+      });
+
+      copyBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(url);
+          alert('Link copiado.');
+        } catch (err) {
+          console.error('Falha ao copiar link:', err);
+          alert('Nao foi possivel copiar. Copie manualmente da barra de endereco.');
+        }
+      });
+    }
+  };
+
 // ============================================
 // FIM DA ADIÇÃO - Continue com seu código existente
 // ============================================
@@ -2103,6 +2150,12 @@ window.callServer = callServer;
 
   async function init() {
     try {
+      if (frameGuard.isFramed()) {
+        console.warn('App carregado dentro de iframe. Solicite abertura em nova aba.');
+        frameGuard.show();
+        return;
+      }
+
       // Carregar preferências
       const savedPrefs = storage.load('preferences');
       if (savedPrefs) {
@@ -2197,3 +2250,5 @@ window.callServer = callServer;
 
 })();
 </script>
+
+
