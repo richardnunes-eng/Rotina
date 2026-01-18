@@ -1,11 +1,11 @@
-﻿// ============================================
+// ============================================
 // ROUTINE APP - Google Apps Script Backend
 // VERSÃO 2.0 - Com Calendar Sync e Recorrência
 // ============================================
 
 
 // ============================================
-// ADICIONAR NO INÍCIO DO Code.gs (LINHA 1)
+// DEBUG & LOGGING
 // ============================================
 
 const DEBUG_MODE = true;
@@ -91,13 +91,17 @@ function ping() {
   });
 }
 
+// ============================================
+// AUTHENTICATION
+// ============================================
+
 function ensureAuthSheet() {
   const ss = getOrCreateSpreadsheet();
   let sheet = ss.getSheetByName('AUTH_USERS');
   if (!sheet) {
     sheet = ss.insertSheet('AUTH_USERS');
-    sheet.getRange(1, 1, 1, 5).setValues([['email', 'passwordHash', 'salt', 'createdAt', 'lastLoginAt']]);
-    sheet.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#4285f4').setFontColor('#ffffff');
+    sheet.getRange(1, 1, 1, 6).setValues([['name', 'email', 'passwordHash', 'salt', 'createdAt', 'lastLoginAt']]);
+    sheet.getRange(1, 1, 1, 6).setFontWeight('bold').setBackground('#4285f4').setFontColor('#ffffff');
     sheet.setFrozenRows(1);
   }
   return sheet;
@@ -113,19 +117,20 @@ function findAuthUser(email) {
   const sheet = ensureAuthSheet();
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][0]).toLowerCase() === email.toLowerCase()) {
-      return { row: i + 1, email: data[i][0], passwordHash: data[i][1], salt: data[i][2] };
+    if (String(data[i][1]).toLowerCase() === email.toLowerCase()) {
+      return { row: i + 1, email: data[i][1], passwordHash: data[i][2], salt: data[i][3] };
     }
   }
   return null;
 }
 
-function registerUser(email, password) {
+function registerUser(name, email, password) {
   return safeExecute('registerUser', () => {
+    const cleanName = String(name || '').trim();
     const cleanEmail = String(email || '').trim().toLowerCase();
     const cleanPassword = String(password || '');
-    if (!cleanEmail || !cleanPassword) {
-      return { ok: false, error: 'E-mail e senha sao obrigatorios.' };
+    if (!cleanName || !cleanEmail || !cleanPassword) {
+      return { ok: false, error: 'Nome, e-mail e senha sao obrigatorios.' };
     }
     if (findAuthUser(cleanEmail)) {
       return { ok: false, error: 'E-mail ja cadastrado.' };
@@ -133,8 +138,8 @@ function registerUser(email, password) {
     const salt = Utilities.getUuid();
     const passwordHash = hashPassword(cleanPassword, salt);
     const sheet = ensureAuthSheet();
-    sheet.appendRow([cleanEmail, passwordHash, salt, new Date().toISOString(), '']);
-    return { ok: true, data: { email: cleanEmail } };
+    sheet.appendRow([cleanName, cleanEmail, passwordHash, salt, new Date().toISOString(), '']);
+    return { ok: true, data: { name: cleanName, email: cleanEmail } };
   });
 }
 
@@ -154,15 +159,92 @@ function loginUser(email, password) {
       return { ok: false, error: 'Usuario ou senha invalidos.' };
     }
     const sheet = ensureAuthSheet();
-    sheet.getRange(user.row, 5).setValue(new Date().toISOString());
+    sheet.getRange(user.row, 6).setValue(new Date().toISOString());
     return { ok: true, data: { email: cleanEmail } };
   });
 }
 
-// Configuração da planilha
+function ensureResetSheet() {
+  const ss = getOrCreateSpreadsheet();
+  let sheet = ss.getSheetByName('AUTH_RESETS');
+  if (!sheet) {
+    sheet = ss.insertSheet('AUTH_RESETS');
+    sheet.getRange(1, 1, 1, 5).setValues([['email', 'token', 'expiresAt', 'usedAt', 'createdAt']]);
+    sheet.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#4285f4').setFontColor('#ffffff');
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function requestPasswordReset(email) {
+  return safeExecute('requestPasswordReset', () => {
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    if (!cleanEmail) {
+      return { ok: false, error: 'E-mail obrigatorio.' };
+    }
+    if (!findAuthUser(cleanEmail)) {
+      return { ok: false, error: 'E-mail nao encontrado.' };
+    }
+    const sheet = ensureResetSheet();
+    const token = Utilities.getUuid();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    sheet.appendRow([cleanEmail, token, expiresAt, '', new Date().toISOString()]);
+    return { ok: true, data: { token: token } };
+  });
+}
+
+function resetPassword(email, token, newPassword) {
+  return safeExecute('resetPassword', () => {
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const cleanToken = String(token || '').trim();
+    const cleanPassword = String(newPassword || '');
+    if (!cleanEmail || !cleanToken || !cleanPassword) {
+      return { ok: false, error: 'Dados invalidos.' };
+    }
+    const user = findAuthUser(cleanEmail);
+    if (!user) {
+      return { ok: false, error: 'E-mail nao encontrado.' };
+    }
+
+    const sheet = ensureResetSheet();
+    const data = sheet.getDataRange().getValues();
+    let rowIndex = -1;
+    let expiresAt = '';
+    let usedAt = '';
+    for (let i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][0]).toLowerCase() === cleanEmail && String(data[i][1]) === cleanToken) {
+        rowIndex = i + 1;
+        expiresAt = data[i][2];
+        usedAt = data[i][3];
+        break;
+      }
+    }
+    if (rowIndex === -1) {
+      return { ok: false, error: 'Codigo invalido.' };
+    }
+    if (usedAt) {
+      return { ok: false, error: 'Codigo ja utilizado.' };
+    }
+    if (expiresAt && new Date(expiresAt) < new Date()) {
+      return { ok: false, error: 'Codigo expirado.' };
+    }
+
+    const salt = Utilities.getUuid();
+    const passwordHash = hashPassword(cleanPassword, salt);
+    const authSheet = ensureAuthSheet();
+    authSheet.getRange(user.row, 3).setValue(passwordHash);
+    authSheet.getRange(user.row, 4).setValue(salt);
+    sheet.getRange(rowIndex, 4).setValue(new Date().toISOString());
+    return { ok: true, data: { email: cleanEmail } };
+  });
+}
+
+// ============================================
+// DATABASE CONFIGURATION
+// ============================================
+
 const SPREADSHEET_ID = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
 
-// Obtém ou cria a planilha
 function getOrCreateSpreadsheet() {
   let ss;
   
@@ -176,13 +258,12 @@ function getOrCreateSpreadsheet() {
   }
   
   // Criar nova planilha
-  ss = SpreadsheetApp.create('Routine App Database v2');
+  ss = SpreadsheetApp.create('THX Ops Database');
   PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', ss.getId());
   Logger.log('Nova planilha criada: ' + ss.getUrl());
   return ss;
 }
 
-// Inicializa a estrutura do banco de dados
 function initializeDatabase() {
   const ss = getOrCreateSpreadsheet();
   
@@ -208,7 +289,6 @@ function initializeDatabase() {
   });
 }
 
-// Obtém userKey (email ou fallback)
 function getUserKey() {
   try {
     const email = Session.getActiveUser().getEmail();
@@ -219,7 +299,10 @@ function getUserKey() {
   return 'anonymous_' + Utilities.getUuid();
 }
 
-// Helpers de CRUD genéricos
+// ============================================
+// GENERIC CRUD HELPERS
+// ============================================
+
 function createRecord(sheetName, data) {
   const ss = getOrCreateSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
@@ -306,13 +389,85 @@ function deleteRecord(sheetName, id) {
 }
 
 // ============================================
-// ENDPOINTS DA API
+// RECURRING TASKS GENERATOR
+// ============================================
+
+function generateRecurringTasks(userKey, options) {
+  options = options || { daysAhead: 14 };
+  const daysAhead = options.daysAhead || 14;
+  
+  try {
+    const templates = findRecords('TASKS', { userKey: userKey, isRecurring: true });
+    
+    templates.forEach(template => {
+      if (!template.recurrenceStartDate) return;
+      
+      const startDate = new Date(template.recurrenceStartDate);
+      const endDate = template.recurrenceEndDate ? new Date(template.recurrenceEndDate) : null;
+      const today = new Date();
+      const futureDate = new Date();
+      futureDate.setDate(futureDate.getDate() + daysAhead);
+      
+      // Gerar instâncias para os próximos dias
+      for (let d = new Date(today); d <= futureDate; d.setDate(d.getDate() + 1)) {
+        if (d < startDate) continue;
+        if (endDate && d > endDate) break;
+        
+        const dateStr = d.toISOString().split('T')[0];
+        
+        // Verificar se já existe instância para este dia
+        const existing = findRecords('TASKS', { 
+          userKey: userKey, 
+          templateTaskId: template.id, 
+          dueDate: dateStr 
+        });
+        
+        if (existing.length === 0) {
+          // Criar nova instância
+          const instance = {
+            id: Utilities.getUuid(),
+            userKey: userKey,
+            title: template.title,
+            description: template.description,
+            priority: template.priority,
+            dueDate: dateStr,
+            dueTime: template.recurrenceTime || '',
+            status: 'open',
+            tagsJson: template.tagsJson,
+            calendarEventId: '',
+            calendarUpdatedAt: '',
+            isRecurring: false,
+            recurrenceType: '',
+            recurrenceDays: '',
+            recurrenceTime: '',
+            recurrenceStartDate: '',
+            recurrenceEndDate: '',
+            recurrenceNextRun: '',
+            templateTaskId: template.id,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+          
+          createRecord('TASKS', instance);
+        }
+      }
+    });
+    
+    return { ok: true, data: { generated: true } };
+  } catch (error) {
+    log('Erro ao gerar tarefas recorrentes', error.toString());
+    return { ok: false, error: error.toString() };
+  }
+}
+
+// ============================================
+// API ENDPOINTS
 // ============================================
 
 function doGet() {
   return HtmlService.createTemplateFromFile('index')
     .evaluate()
-    .setTitle('Routine App v2')
+    .setTitle('THX Ops')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
@@ -321,9 +476,7 @@ function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
 
-// Inicializa o app e retorna todos os dados do usuário
 function initApp(providedUserKey) {
-  
   return safeExecute('initApp', () => {
     log('=== INIT APP COMEÇANDO ===');
     const userKey = providedUserKey || getUserKey();
@@ -353,20 +506,8 @@ function initApp(providedUserKey) {
     const goals = findRecords('GOALS', { userKey: userKey });
     const goalLogs = findRecords('GOAL_LOG', { userKey: userKey });
     const journals = findRecords('JOURNAL', { userKey: userKey });
-    return {
-      ok: true,
-      data: {
-        userKey: userKey,
-        habits: habits,
-        habitLogs: habitLogs,
-        tasks: tasks,
-        taskChecklists: taskChecklists,
-        goals: goals,
-        goalLogs: goalLogs,
-        journals: journals
-      }
-    };
-const response = {
+    
+    const response = {
       ok: true,
       data: {
         userKey: userKey,
@@ -382,12 +523,11 @@ const response = {
     
     log('=== INIT APP CONCLUÍDO ===');
     return response;
-    
   }, { userKey: providedUserKey });
 }
 
 // ============================================
-// HABITS (mantém implementação original)
+// HABITS
 // ============================================
 
 function createHabit(userKey, habitData) {
@@ -490,7 +630,7 @@ function toggleHabitCompletion(userKey, habitId, date) {
 }
 
 // ============================================
-// TASKS (atualizado com novos campos)
+// TASKS
 // ============================================
 
 function createTask(userKey, taskData) {
@@ -653,7 +793,7 @@ function deleteChecklistItem(userKey, itemId) {
 }
 
 // ============================================
-// GOALS (mantém implementação original)
+// GOALS
 // ============================================
 
 function createGoal(userKey, goalData) {
@@ -752,7 +892,7 @@ function addGoalProgress(userKey, goalId, delta, note, date) {
 }
 
 // ============================================
-// JOURNAL (mantém implementação original)
+// JOURNAL
 // ============================================
 
 function upsertJournalEntry(userKey, date, mood, energy, note, gratitude) {
@@ -806,7 +946,7 @@ function listJournalEntries(userKey, range) {
 }
 
 // ============================================
-// EXPORT (mantém implementação original)
+// EXPORT
 // ============================================
 
 function exportUserData(userKey, format) {
@@ -850,4 +990,3 @@ function exportUserData(userKey, format) {
     return { ok: false, error: error.toString() };
   }
 }
-

@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Routine App</title>
+  <title>THX Ops</title>
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <?!= include('styles'); ?>
@@ -23,8 +23,8 @@
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <div class="logo">
-          <span class="material-icons">track_changes</span>
-          <h1>Routine</h1>
+          <img src="https://drive.google.com/thumbnail?id=1Ft7TTx-y4bLisPyCnBeXZmh9gPgLFZ1T&sz=w120" alt="THX" style="width: 32px; height: 32px; border-radius: 8px;">
+          <h1>THX</h1>
         </div>
         <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
           <span class="material-icons">brightness_6</span>
@@ -44,13 +44,17 @@
           <span class="material-icons">task_alt</span>
           <span>Tarefas</span>
         </a>
+        <a href="#kanban" class="nav-item" data-view="kanban">
+          <span class="material-icons">view_kanban</span>
+          <span>Kanban</span>
+        </a>
+        <a href="#calendar" class="nav-item" data-view="calendar">
+        <span class="material-icons">event</span>
+        <span>Calendário</span>
+        </a>
         <a href="#goals" class="nav-item" data-view="goals">
           <span class="material-icons">flag</span>
           <span>Metas</span>
-        </a>
-        <a href="#journal" class="nav-item" data-view="journal">
-          <span class="material-icons">book</span>
-          <span>Diário</span>
         </a>
         <a href="#settings" class="nav-item" data-view="settings">
           <span class="material-icons">settings</span>
@@ -59,12 +63,12 @@
       </nav>
       
       <div class="sidebar-footer">
-        <div class="user-info">
-          <span class="material-icons">account_circle</span>
-          <span id="user-email">Carregando...</span>
-        </div>
-      </div>
-    </aside>
+  <div class="user-info">
+    <span class="material-icons">account_circle</span>
+    <span id="user-email">Carregando...</span>
+  </div>
+</div>
+</aside>
 
     <!-- Conteúdo principal -->
     <main class="main-content">
@@ -89,11 +93,7 @@
         <span class="material-icons">flag</span>
         <span>Metas</span>
       </a>
-      <a href="#journal" class="nav-item" data-view="journal">
-        <span class="material-icons">book</span>
-        <span>Diário</span>
-      </a>
-    </nav>
+      </nav>
   </div>
 
   <!-- Toast Container -->
@@ -105,3 +105,6 @@
   <?!= include('app'); ?>
 </body>
 </html>
+
+
+
