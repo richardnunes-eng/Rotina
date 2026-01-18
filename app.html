@@ -1626,6 +1626,61 @@
   // INITIALIZATION
   // ============================================
 
+  // Verificação defensiva de autenticação
+  async function checkAuth() {
+    try {
+      const sessionInfo = await api.call('getSessionInfo');
+
+      if (!sessionInfo.ok || !sessionInfo.loggedIn) {
+        console.warn('Usuário não autenticado, redirecionando...');
+
+        // Redirecionar para tela de login
+        if (window.self !== window.top) {
+          try {
+            window.top.location.href = window.location.href;
+          } catch (e) {
+            // Se não conseguir acessar window.top (CORS), apenas recarregar
+            window.location.reload();
+          }
+        } else {
+          window.location.reload();
+        }
+
+        return false;
+      }
+
+      console.log('Autenticação verificada:', sessionInfo.email);
+      return true;
+
+    } catch (error) {
+      console.error('Erro ao verificar autenticação:', error);
+
+      // Em caso de erro, mostrar mensagem ao invés de tela branca
+      const appContainer = document.getElementById('app');
+      const loadingScreen = document.getElementById('loading-screen');
+
+      if (loadingScreen) loadingScreen.style.display = 'none';
+      if (appContainer) {
+        appContainer.style.display = 'flex';
+        appContainer.innerHTML = `
+          <div style="padding: 40px; text-align: center; margin: auto;">
+            <span class="material-icons" style="font-size: 64px; color: var(--error-color); margin-bottom: 20px;">error_outline</span>
+            <h2 style="color: var(--text-primary); margin-bottom: 12px;">Erro ao carregar aplicativo</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 24px;">
+              Não foi possível verificar sua autenticação. Tente recarregar a página ou fazer login novamente.
+            </p>
+            <button class="btn btn-primary" onclick="location.reload()">
+              <span class="material-icons">refresh</span>
+              Recarregar
+            </button>
+          </div>
+        `;
+      }
+
+      return false;
+    }
+  }
+
   async function initializeApp() {
     const loadingScreen = document.getElementById('loading-screen');
     const appContainer = document.getElementById('app');
@@ -1679,8 +1734,15 @@
     }
   }
 
-  document.addEventListener('DOMContentLoaded', function() {
+  document.addEventListener('DOMContentLoaded', async function() {
     theme.init();
+
+    // Verificação defensiva de autenticação antes de tudo
+    const isAuthenticated = await checkAuth();
+    if (!isAuthenticated) {
+      console.log('Autenticação falhou, não inicializando app');
+      return;
+    }
 
     // Verificar se há dados em cache para carregar rapidamente
     const cachedData = storage.load('appCache');
