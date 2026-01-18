@@ -27,6 +27,68 @@
       const saveBtn = document.getElementById('deployment-id-save');
       const status = document.getElementById('deployment-id-status');
 
+      function isFramed() {
+        return window.top !== window.self;
+      }
+
+      function openInNewTab(url, statusEl) {
+        let opened = null;
+        try {
+          opened = window.open(url, '_blank', 'noopener,noreferrer');
+        } catch (err) {
+          console.error('Falha ao abrir nova aba:', err);
+        }
+        if (!opened && statusEl) {
+          statusEl.textContent = 'Popup bloqueado. Permita popups para este site ou copie o link.';
+        }
+        return !!opened;
+      }
+
+      function showOutOfFrameGate(url) {
+        const card = document.querySelector('.card');
+        if (!card) return;
+        card.innerHTML = `
+          <h1>Abrir fora do iframe</h1>
+          <p>O Google bloqueia a execucao deste app dentro de iframe.</p>
+          <p>Abra o Web App em uma nova aba para continuar.</p>
+          <div style="display: flex; gap: 12px; justify-content: center; margin: 16px 0;">
+            <button id="open-webapp-btn">Abrir Web App</button>
+            <button id="copy-webapp-btn">Copiar link</button>
+          </div>
+          <input id="webapp-url-input" type="text" value="${url}" readonly>
+          <div id="webapp-gate-status" class="status"></div>
+        `;
+
+        const openBtn = card.querySelector('#open-webapp-btn');
+        const copyBtn = card.querySelector('#copy-webapp-btn');
+        const status = card.querySelector('#webapp-gate-status');
+
+        openBtn.addEventListener('click', () => {
+          if (!url) {
+            status.textContent = 'URL do Web App vazia. Configure o Deployment ID.';
+            return;
+          }
+          const opened = openInNewTab(url, status);
+          if (opened) {
+            status.textContent = 'Nova aba aberta. Volte aqui se precisar.';
+          }
+        });
+
+        copyBtn.addEventListener('click', async () => {
+          if (!url) {
+            status.textContent = 'URL do Web App vazia. Configure o Deployment ID.';
+            return;
+          }
+          try {
+            await navigator.clipboard.writeText(url);
+            status.textContent = 'Link copiado.';
+          } catch (err) {
+            console.error('Falha ao copiar link:', err);
+            status.textContent = 'Falha ao copiar. Copie manualmente do campo acima.';
+          }
+        });
+      }
+
       saveBtn.addEventListener('click', () => {
         const deploymentId = (input.value || '').trim();
         if (!deploymentId) {
@@ -41,8 +103,13 @@
         google.script.run
           .withSuccessHandler((response) => {
             if (response && response.ok && response.data && response.data.webAppUrl) {
-              status.textContent = 'Salvo. Redirecionando...';
-              window.location.href = response.data.webAppUrl;
+              const url = response.data.webAppUrl;
+              status.textContent = 'Salvo. Abra o Web App para continuar.';
+              if (isFramed()) {
+                showOutOfFrameGate(url);
+              } else {
+                window.location.href = url;
+              }
             } else {
               status.textContent = response && response.error ? response.error : 'Falha ao salvar.';
             }

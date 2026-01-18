@@ -152,10 +152,27 @@ window.callServer = callServer;
     isFramed: function() {
       return window.top !== window.self;
     },
+    openInNewTab: function(url, statusEl) {
+      let opened = null;
+      try {
+        opened = window.open(url, '_blank', 'noopener,noreferrer');
+      } catch (err) {
+        console.error('Falha ao abrir nova aba:', err);
+      }
+      if (!opened) {
+        const msg = 'Popup bloqueado. Permita popups para este site ou copie o link.';
+        if (statusEl) {
+          statusEl.textContent = msg;
+        } else {
+          console.warn(msg);
+        }
+      }
+      return !!opened;
+    },
     showSetup: function() {
       const loading = document.getElementById('loading-screen');
       if (!loading) {
-        alert('WEBAPP_URL vazio. Configure o Web App URL no setup.');
+        console.warn('WEBAPP_URL vazio. Configure o Web App URL no setup.');
         return;
       }
 
@@ -180,17 +197,71 @@ window.callServer = callServer;
         }
         status.textContent = 'Salvando...';
         try {
-          const response = await callServer.execute('saveDeploymentId', [deploymentId], 15000);
-          if (response && response.ok && response.data && response.data.webAppUrl) {
-            appConfig.webAppUrl = response.data.webAppUrl;
-            status.textContent = 'Salvo. Redirecionando...';
-            window.location.href = appConfig.webAppUrl;
+        const response = await callServer.execute('saveDeploymentId', [deploymentId], 15000);
+        if (response && response.ok && response.data && response.data.webAppUrl) {
+          appConfig.webAppUrl = response.data.webAppUrl;
+          status.textContent = 'Salvo. Abra o Web App em nova aba.';
+          if (frameGuard.isFramed()) {
+            frameGuard.showOutOfFrameGate();
           } else {
-            status.textContent = (response && response.error) ? response.error : 'Falha ao salvar. Tente novamente.';
+            window.location.href = appConfig.webAppUrl;
           }
+        } else {
+          status.textContent = (response && response.error) ? response.error : 'Falha ao salvar. Tente novamente.';
+        }
+      } catch (err) {
+        console.error('Falha ao salvar deploymentId:', err);
+        status.textContent = 'Erro ao salvar. Tente novamente.';
+      }
+    });
+  },
+    showOutOfFrameGate: function() {
+      const url = this.getWebAppUrl();
+      const loading = document.getElementById('loading-screen');
+      if (!loading) {
+        console.warn('loading-screen nao encontrado para exibir gate.');
+        return;
+      }
+
+      loading.innerHTML = `<div style="max-width: 560px; text-align: center;">
+        <h2>Abrir fora do iframe</h2>
+        <p>O Google bloqueia a execucao deste app dentro de iframe.</p>
+        <p>Abra o Web App em uma nova aba para continuar.</p>
+        <div style="display: flex; gap: 12px; justify-content: center; margin: 16px 0;">
+          <button id="open-webapp-btn" style="padding: 10px 16px;">Abrir Web App</button>
+          <button id="copy-webapp-btn" style="padding: 10px 16px;">Copiar link</button>
+        </div>
+        <input id="webapp-url-input" type="text" value="${url}" readonly style="width: 100%; padding: 10px;">
+        <p id="webapp-gate-status" style="margin-top: 12px; color: #d32f2f;"></p>
+      </div>`;
+      loading.style.display = 'flex';
+
+      const openBtn = loading.querySelector('#open-webapp-btn');
+      const copyBtn = loading.querySelector('#copy-webapp-btn');
+      const status = loading.querySelector('#webapp-gate-status');
+
+      openBtn.addEventListener('click', () => {
+        if (!url) {
+          status.textContent = 'URL do Web App vazia. Configure o Deployment ID.';
+          return;
+        }
+        const opened = frameGuard.openInNewTab(url, status);
+        if (opened) {
+          status.textContent = 'Nova aba aberta. Volte aqui se precisar.';
+        }
+      });
+
+      copyBtn.addEventListener('click', async () => {
+        if (!url) {
+          status.textContent = 'URL do Web App vazia. Configure o Deployment ID.';
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(url);
+          status.textContent = 'Link copiado.';
         } catch (err) {
-          console.error('Falha ao salvar deploymentId:', err);
-          status.textContent = 'Erro ao salvar. Tente novamente.';
+          console.error('Falha ao copiar link:', err);
+          status.textContent = 'Falha ao copiar. Copie manualmente do campo acima.';
         }
       });
     },
@@ -201,33 +272,9 @@ window.callServer = callServer;
         this.showSetup();
         return false;
       }
-      console.warn('App carregado dentro de iframe. Redirecionando para o Web App.');
-      try {
-        window.top.location.href = url;
-      } catch (err) {
-        console.error('Falha ao redirecionar para o Web App:', err);
-        try {
-          window.location.href = url;
-          return true;
-        } catch (innerErr) {
-          console.error('Falha ao redirecionar na mesma aba:', innerErr);
-        }
-
-        const loading = document.getElementById('loading-screen');
-        if (loading) {
-          loading.innerHTML = `<div style="max-width: 520px; text-align: center;">
-            <h2>Abra o Web App fora do iframe</h2>
-            <p>O navegador bloqueou o redirecionamento automatico.</p>
-            <p><a href="${url}" target="_top" rel="noopener">Abrir Web App</a></p>
-            <p>Se o link nao abrir, copie e cole no navegador:</p>
-            <input type="text" value="${url}" readonly style="width: 100%; padding: 10px;">
-          </div>`;
-          loading.style.display = 'flex';
-        } else {
-          alert('Falha ao redirecionar. Abra o Web App URL manualmente.');
-        }
-      }
-      return true;
+      console.warn('App carregado dentro de iframe. Exibindo gate para abrir fora.');
+      this.showOutOfFrameGate();
+      return false;
     }
   };
 
@@ -2215,7 +2262,7 @@ window.callServer = callServer;
       return;
     }
 
-    await bootstrap();
+    await init();
   }
 
   async function init() {
