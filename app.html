@@ -284,18 +284,27 @@
             resolve({ ok: false, error: 'Ambiente de execução não disponível' });
             return;
           }
-          
+
+          // Timeout de 60 segundos
+          const timeoutId = setTimeout(() => {
+            console.error('Timeout na chamada:', functionName);
+            resolve({ ok: false, error: 'A operação demorou muito tempo. Tente novamente.' });
+          }, 60000);
+
           google.script.run
             .withSuccessHandler((result) => {
+              clearTimeout(timeoutId);
               if (result === null || result === undefined) {
-                resolve({ ok: false, error: 'Resposta vazia do servidor' });
+                resolve({ ok: false, error: 'O servidor retornou uma resposta vazia. Verifique as configurações e tente novamente.' });
               } else {
                 resolve(result);
               }
             })
             .withFailureHandler((error) => {
+              clearTimeout(timeoutId);
               console.error('Erro na chamada API:', error);
-              resolve({ ok: false, error: error.message || error.toString() });
+              const errorMsg = error.message || error.toString();
+              resolve({ ok: false, error: errorMsg });
             })
             [functionName](...args);
         } catch (error) {
@@ -1094,6 +1103,10 @@
         return;
       }
 
+      // Desabilitar modal durante operação
+      const modalActions = document.querySelectorAll('.modal-footer button');
+      modalActions.forEach(btn => btn.disabled = true);
+
       const habitData = {
         name,
         description,
@@ -1104,6 +1117,9 @@
       };
 
       const result = await api.createHabit(habitData);
+
+      // Reabilitar botões
+      modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
         Object.assign(appState, result.data);
@@ -1172,8 +1188,15 @@
         return;
       }
 
+      // Desabilitar modal durante operação
+      const modalActions = document.querySelectorAll('.modal-footer button');
+      modalActions.forEach(btn => btn.disabled = true);
+
       const updates = { name, description, category };
       const result = await api.updateHabit(habitId, updates);
+
+      // Reabilitar botões
+      modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
         Object.assign(appState, result.data);
@@ -1190,7 +1213,14 @@
         return;
       }
 
+      // Desabilitar modal durante operação
+      const modalActions = document.querySelectorAll('.modal-footer button');
+      modalActions.forEach(btn => btn.disabled = true);
+
       const result = await api.deleteHabit(habitId);
+
+      // Reabilitar botões
+      modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
         Object.assign(appState, result.data);
@@ -1279,6 +1309,10 @@
         return;
       }
 
+      // Desabilitar modal durante operação
+      const modalActions = document.querySelectorAll('.modal-footer button');
+      modalActions.forEach(btn => btn.disabled = true);
+
       const taskData = {
         title,
         description,
@@ -1289,6 +1323,9 @@
       };
 
       const result = await api.createTask(taskData);
+
+      // Reabilitar botões
+      modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
         Object.assign(appState, result.data);
@@ -1376,6 +1413,10 @@
         return;
       }
 
+      // Desabilitar modal durante operação
+      const modalActions = document.querySelectorAll('.modal-footer button');
+      modalActions.forEach(btn => btn.disabled = true);
+
       const updates = {
         title,
         description,
@@ -1386,6 +1427,9 @@
       };
 
       const result = await api.updateTask(taskId, updates);
+
+      // Reabilitar botões
+      modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
         Object.assign(appState, result.data);
@@ -1402,7 +1446,14 @@
         return;
       }
 
+      // Desabilitar modal durante operação
+      const modalActions = document.querySelectorAll('.modal-footer button');
+      modalActions.forEach(btn => btn.disabled = true);
+
       const result = await api.deleteTask(taskId);
+
+      // Reabilitar botões
+      modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
         Object.assign(appState, result.data);
@@ -1488,6 +1539,10 @@
         return;
       }
 
+      // Desabilitar modal durante operação
+      const modalActions = document.querySelectorAll('.modal-footer button');
+      modalActions.forEach(btn => btn.disabled = true);
+
       const goalData = {
         name,
         description,
@@ -1500,6 +1555,9 @@
       };
 
       const result = await api.createGoal(goalData);
+
+      // Reabilitar botões
+      modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
         Object.assign(appState, result.data);
@@ -1610,6 +1668,10 @@
         return;
       }
 
+      // Desabilitar modal durante operação
+      const modalActions = document.querySelectorAll('.modal-footer button');
+      modalActions.forEach(btn => btn.disabled = true);
+
       const updates = {
         name,
         description,
@@ -1621,6 +1683,9 @@
       };
 
       const result = await api.updateGoal(goalId, updates);
+
+      // Reabilitar botões
+      modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
         Object.assign(appState, result.data);
@@ -1663,7 +1728,14 @@
         return;
       }
 
+      // Desabilitar modal durante operação
+      const modalActions = document.querySelectorAll('.modal-footer button');
+      modalActions.forEach(btn => btn.disabled = true);
+
       const result = await api.deleteGoal(goalId);
+
+      // Reabilitar botões
+      modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
         Object.assign(appState, result.data);
@@ -2141,6 +2213,39 @@
   // INITIALIZATION
   // ============================================
 
+  // Verificar se estamos em iframe restrito
+  try {
+    if (window.self !== window.top) {
+      // Em iframe, tentar acessar window.top
+      const testAccess = window.top.location.href; // Vai dar erro se CSP bloquear
+      console.log('Em iframe, mas com acesso ao parent');
+      window.top.location.href = window.location.href;
+    }
+  } catch (e) {
+    // CSP bloqueou acesso ao parent
+    console.warn('Detectado iframe com CSP restritivo:', e);
+    const appContainer = document.getElementById('app');
+    const loadingScreen = document.getElementById('loading-screen');
+
+    if (loadingScreen) loadingScreen.style.display = 'none';
+    if (appContainer) {
+      appContainer.style.display = 'flex';
+      appContainer.innerHTML = `
+        <div style="padding: 40px; text-align: center; margin: auto; max-width: 500px;">
+          <span class="material-icons" style="font-size: 64px; color: var(--accent-orange); margin-bottom: 20px;">warning</span>
+          <h2 style="color: var(--text-primary); margin-bottom: 12px;">App executando em iframe restrito</h2>
+          <p style="color: var(--text-secondary); margin-bottom: 24px;">
+            Por motivos de segurança (CSP), este app precisa ser aberto em uma nova aba.
+          </p>
+          <button class="btn btn-primary" onclick="window.open(window.location.href, '_blank')">
+            <span class="material-icons">open_in_new</span>
+            Abrir em nova aba
+          </button>
+        </div>
+      `;
+    }
+  }
+
   // Verificação defensiva de autenticação
   async function checkAuth() {
     try {
@@ -2157,18 +2262,8 @@
 
         // Redirecionar para forçar login padrão do Google
         // O backend vai detectar que não está logado e retornar bootstrap.html
-        if (window.self !== window.top) {
-          try {
-            console.log('Em iframe, tentando window.top.location');
-            window.top.location.href = window.location.href;
-          } catch (e) {
-            console.warn('Não conseguiu acessar window.top (CORS), recarregando:', e);
-            window.location.reload();
-          }
-        } else {
-          console.log('Recarregando para mostrar bootstrap e forçar login Google');
-          window.location.reload();
-        }
+        console.log('Recarregando para mostrar bootstrap e forçar login Google');
+        window.location.reload();
 
         return false;
       }
@@ -2209,35 +2304,56 @@
     const loadingScreen = document.getElementById('loading-screen');
     const appContainer = document.getElementById('app');
 
-    try {
-      const result = await api.initApp();
+    const maxRetries = 3;
+    let attempt = 0;
 
-      if (result.ok) {
-        Object.assign(appState, result.data);
-        storage.save('appCache', appState);
-
-        // Atualizar email do usuário na sidebar
-        const userEmailElement = document.getElementById('user-email');
-        if (userEmailElement) {
-          userEmailElement.textContent = result.data.userKey || 'Usuário';
+    while (attempt < maxRetries) {
+      try {
+        attempt++;
+        if (attempt > 1) {
+          console.log(`Tentativa ${attempt}/${maxRetries} de inicializar o app...`);
         }
 
-        if (appContainer) {
-          appContainer.style.display = '';
-        }
-        if (loadingScreen) {
-          loadingScreen.style.display = 'none';
-        }
+        const result = await api.initApp();
 
-        router.init();
-        toast.success('Bem-vindo ao THX Ops!');
-      } else {
-        // Se houver erro, mostrar tela de erro
-        showErrorScreen(result.error || 'Erro desconhecido ao carregar aplicação');
+        if (result.ok) {
+          Object.assign(appState, result.data);
+          storage.save('appCache', appState);
+
+          // Atualizar email do usuário na sidebar
+          const userEmailElement = document.getElementById('user-email');
+          if (userEmailElement) {
+            userEmailElement.textContent = result.data.userKey || 'Usuário';
+          }
+
+          if (appContainer) {
+            appContainer.style.display = '';
+          }
+          if (loadingScreen) {
+            loadingScreen.style.display = 'none';
+          }
+
+          router.init();
+          toast.success('Bem-vindo ao THX Ops!');
+          return; // Sucesso, sair da função
+        } else {
+          // Se houver erro e ainda há tentativas, esperar e tentar novamente
+          if (attempt < maxRetries) {
+            console.warn(`Falha na tentativa ${attempt}, tentando novamente em 2 segundos...`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            continue;
+          }
+          // Última tentativa falhou, mostrar tela de erro
+          showErrorScreen(result.error || 'Erro desconhecido ao carregar aplicação');
+        }
+      } catch (error) {
+        console.error(`Erro na tentativa ${attempt}:`, error);
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          continue;
+        }
+        showErrorScreen('Erro ao inicializar aplicação. Por favor, recarregue a página.');
       }
-    } catch (error) {
-      console.error('Erro na inicialização:', error);
-      showErrorScreen('Erro ao inicializar aplicação. Por favor, recarregue a página.');
     }
   }
 

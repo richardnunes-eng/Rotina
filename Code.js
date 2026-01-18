@@ -1,6 +1,6 @@
 // ============================================
 // ROUTINE APP - Google Apps Script Backend
-// VERSÃƒO 2.0 - Com Calendar Sync e RecorrÃªncia
+// VERSÃO 2.0 - Com Calendar Sync e Recorrência
 // ============================================
 
 
@@ -20,19 +20,19 @@ function log(message, data) {
 function safeExecute(fnName, handler, context) {
   const startTime = new Date();
   context = context || {};
-  
+
   try {
     log(`[${fnName}] INICIANDO`, context);
     const result = handler();
-    
+
     if (result === undefined || result === null) {
       return {
         ok: false,
-        error: `FunÃ§Ã£o ${fnName} nÃ£o retornou valor vÃ¡lido`,
+        error: `Função ${fnName} não retornou valor válido`,
         meta: { fnName, duration: new Date() - startTime, timestamp: new Date().toISOString() }
       };
     }
-    
+
     if (typeof result.ok !== 'boolean') {
       return {
         ok: true,
@@ -40,17 +40,17 @@ function safeExecute(fnName, handler, context) {
         meta: { fnName, duration: new Date() - startTime, timestamp: new Date().toISOString() }
       };
     }
-    
+
     const sanitized = sanitizeForJSON(result);
     log(`[${fnName}] SUCESSO`);
-    
+
     return {
       ...sanitized,
       meta: { fnName, duration: new Date() - startTime, timestamp: new Date().toISOString() }
     };
-    
+
   } catch (error) {
-    log(`[${fnName}] EXCEÃ‡ÃƒO`, error.toString());
+    log(`[${fnName}] EXCEÇÃO`, error.toString());
     return {
       ok: false,
       error: error.toString(),
@@ -78,7 +78,7 @@ function ping() {
     try {
       email = Session.getActiveUser().getEmail();
     } catch (e) {}
-    
+
     return {
       ok: true,
       data: {
@@ -247,26 +247,30 @@ const SPREADSHEET_ID = PropertiesService.getScriptProperties().getProperty('SPRE
 
 function getOrCreateSpreadsheet() {
   let ss;
-  
+
   if (SPREADSHEET_ID) {
     try {
       ss = SpreadsheetApp.openById(SPREADSHEET_ID);
       return ss;
     } catch (e) {
-      // ID invÃ¡lido, criar nova planilha
+      throw new Error('Erro ao abrir planilha: ' + e.toString() + '. Verifique se SPREADSHEET_ID está configurado corretamente nas Script Properties.');
     }
   }
-  
+
   // Criar nova planilha
-  ss = SpreadsheetApp.create('THX Ops Database');
-  PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', ss.getId());
-  Logger.log('Nova planilha criada: ' + ss.getUrl());
-  return ss;
+  try {
+    ss = SpreadsheetApp.create('THX Ops Database');
+    PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', ss.getId());
+    Logger.log('Nova planilha criada: ' + ss.getUrl());
+    return ss;
+  } catch (e) {
+    throw new Error('Erro ao criar planilha: ' + e.toString());
+  }
 }
 
 function initializeDatabase() {
   const ss = getOrCreateSpreadsheet();
-  
+
   const sheets = {
     'USERS': ['userKey', 'email', 'createdAt'],
     'HABITS': ['id', 'userKey', 'name', 'category', 'color', 'icon', 'frequencyJson', 'goalPerDay', 'reminderTime', 'active', 'createdAt', 'updatedAt'],
@@ -277,7 +281,7 @@ function initializeDatabase() {
     'GOAL_LOG': ['id', 'goalId', 'userKey', 'deltaValue', 'note', 'date', 'createdAt'],
     'JOURNAL': ['id', 'userKey', 'date', 'mood', 'energy', 'note', 'gratitude', 'createdAt', 'updatedAt']
   };
-  
+
   Object.keys(sheets).forEach(sheetName => {
     let sheet = ss.getSheetByName(sheetName);
     if (!sheet) {
@@ -294,7 +298,7 @@ function getUserKey() {
     const email = Session.getActiveUser().getEmail();
     if (email) return email;
   } catch (e) {
-    // SessÃ£o anÃ´nima
+    // Sessão anônima
   }
   return 'anonymous_' + Utilities.getUuid();
 }
@@ -307,33 +311,33 @@ function createRecord(sheetName, data) {
   const ss = getOrCreateSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  
+
   const row = headers.map(header => data[header] !== undefined ? data[header] : '');
   sheet.appendRow(row);
-  
+
   return data;
 }
 
 function findRecords(sheetName, filter) {
   const ss = getOrCreateSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
-  
+
   if (!sheet || sheet.getLastRow() <= 1) {
     return [];
   }
-  
+
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
-  
+
   const records = [];
   for (let i = 1; i < data.length; i++) {
     const record = {};
     let matches = true;
-    
+
     for (let j = 0; j < headers.length; j++) {
       record[headers[j]] = data[i][j];
     }
-    
+
     // Aplicar filtros
     for (let key in filter) {
       if (record[key] != filter[key]) {
@@ -341,13 +345,13 @@ function findRecords(sheetName, filter) {
         break;
       }
     }
-    
+
     if (matches) {
       record._rowIndex = i + 1;
       records.push(record);
     }
   }
-  
+
   return records;
 }
 
@@ -357,7 +361,7 @@ function updateRecord(sheetName, id, updates) {
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
   const idCol = headers.indexOf('id');
-  
+
   for (let i = 1; i < data.length; i++) {
     if (data[i][idCol] === id) {
       for (let key in updates) {
@@ -378,7 +382,7 @@ function deleteRecord(sheetName, id) {
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
   const idCol = headers.indexOf('id');
-  
+
   for (let i = 1; i < data.length; i++) {
     if (data[i][idCol] === id) {
       sheet.deleteRow(i + 1);
@@ -395,35 +399,35 @@ function deleteRecord(sheetName, id) {
 function generateRecurringTasks(userKey, options) {
   options = options || { daysAhead: 14 };
   const daysAhead = options.daysAhead || 14;
-  
+
   try {
     const templates = findRecords('TASKS', { userKey: userKey, isRecurring: true });
-    
+
     templates.forEach(template => {
       if (!template.recurrenceStartDate) return;
-      
+
       const startDate = new Date(template.recurrenceStartDate);
       const endDate = template.recurrenceEndDate ? new Date(template.recurrenceEndDate) : null;
       const today = new Date();
       const futureDate = new Date();
       futureDate.setDate(futureDate.getDate() + daysAhead);
-      
-      // Gerar instÃ¢ncias para os prÃ³ximos dias
+
+      // Gerar instâncias para os próximos dias
       for (let d = new Date(today); d <= futureDate; d.setDate(d.getDate() + 1)) {
         if (d < startDate) continue;
         if (endDate && d > endDate) break;
-        
+
         const dateStr = d.toISOString().split('T')[0];
-        
-        // Verificar se jÃ¡ existe instÃ¢ncia para este dia
-        const existing = findRecords('TASKS', { 
-          userKey: userKey, 
-          templateTaskId: template.id, 
-          dueDate: dateStr 
+
+        // Verificar se já existe instância para este dia
+        const existing = findRecords('TASKS', {
+          userKey: userKey,
+          templateTaskId: template.id,
+          dueDate: dateStr
         });
-        
+
         if (existing.length === 0) {
-          // Criar nova instÃ¢ncia
+          // Criar nova instância
           const instance = {
             id: Utilities.getUuid(),
             userKey: userKey,
@@ -447,12 +451,12 @@ function generateRecurringTasks(userKey, options) {
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
           };
-          
+
           createRecord('TASKS', instance);
         }
       }
     });
-    
+
     return { ok: true, data: { generated: true } };
   } catch (error) {
     log('Erro ao gerar tarefas recorrentes', error.toString());
@@ -465,29 +469,29 @@ function generateRecurringTasks(userKey, options) {
 // ============================================
 
 function doGet() {
-  // Verificar se o usuÃ¡rio estÃ¡ autenticado
+  // Verificar se o usuário está autenticado
   let userEmail = '';
 
   try {
     userEmail = Session.getActiveUser().getEmail();
   } catch (e) {
-    // Falha ao obter email - nÃ£o autenticado
-    log('Erro ao obter email do usuÃ¡rio', e.toString());
+    // Falha ao obter email - não autenticado
+    log('Erro ao obter email do usuário', e.toString());
   }
 
-  // Se nÃ£o houver email, significa que nÃ£o estÃ¡ autenticado
-  // Retornar pÃ¡gina bootstrap que forÃ§a login padrÃ£o do Google
+  // Se não houver email, significa que não está autenticado
+  // Retornar página bootstrap que força login padrão do Google
   if (!userEmail) {
-    log('UsuÃ¡rio nÃ£o autenticado, redirecionando para bootstrap');
+    log('Usuário não autenticado, redirecionando para bootstrap');
     return HtmlService.createTemplateFromFile('bootstrap')
       .evaluate()
-      .setTitle('THX Ops - AutenticaÃ§Ã£o')
+      .setTitle('THX Ops - Autenticação')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
 
   // Se autenticado, mostrar o app normal
-  log('UsuÃ¡rio autenticado', userEmail);
+  log('Usuário autenticado', userEmail);
   return HtmlService.createTemplateFromFile('index')
     .evaluate()
     .setTitle('THX Ops')
@@ -503,18 +507,18 @@ function getSessionInfo() {
   try {
     let email = null;
 
-    // Tentar obter email do usuÃ¡rio ativo
+    // Tentar obter email do usuário ativo
     try {
       email = Session.getActiveUser().getEmail();
 
-      // Validar que o email Ã© realmente vÃ¡lido (nÃ£o vazio)
+      // Validar que o email é realmente válido (não vazio)
       if (!email || email.trim() === '') {
         email = null;
       }
     } catch (e) {
       log('Erro ao obter Session.getActiveUser().getEmail()', e.toString());
 
-      // Se falhar, tentar mÃ©todo alternativo
+      // Se falhar, tentar método alternativo
       try {
         email = Session.getEffectiveUser().getEmail();
 
@@ -523,7 +527,7 @@ function getSessionInfo() {
         }
       } catch (e2) {
         log('Erro ao obter Session.getEffectiveUser().getEmail()', e2.toString());
-        // Ambos os mÃ©todos falharam
+        // Ambos os métodos falharam
       }
     }
 
@@ -548,10 +552,10 @@ function getSessionInfo() {
 
 function initApp(providedUserKey) {
   return safeExecute('initApp', () => {
-    log('=== INIT APP COMEÃ‡ANDO ===');
+    log('=== INIT APP COMEÇANDO ===');
     const userKey = providedUserKey || getUserKey();
-    
-    // Criar usuÃ¡rio se nÃ£o existir
+
+    // Criar usuário se não existir
     const existingUser = findRecords('USERS', { userKey: userKey });
     if (existingUser.length === 0) {
       createRecord('USERS', {
@@ -560,15 +564,15 @@ function initApp(providedUserKey) {
         createdAt: new Date().toISOString()
       });
     }
-    
+
     // Gerar tarefas recorrentes (silenciosamente, sem bloquear)
     try {
       generateRecurringTasks(userKey, { daysAhead: 14 });
     } catch (e) {
-      Logger.log('Erro ao gerar recorrÃªncias: ' + e.toString());
+      Logger.log('Erro ao gerar recorrências: ' + e.toString());
     }
-    
-    // Buscar todos os dados do usuÃ¡rio
+
+    // Buscar todos os dados do usuário
     const habits = findRecords('HABITS', { userKey: userKey });
     const habitLogs = findRecords('HABIT_LOG', { userKey: userKey });
     const tasks = findRecords('TASKS', { userKey: userKey });
@@ -576,7 +580,7 @@ function initApp(providedUserKey) {
     const goals = findRecords('GOALS', { userKey: userKey });
     const goalLogs = findRecords('GOAL_LOG', { userKey: userKey });
     const journals = findRecords('JOURNAL', { userKey: userKey });
-    
+
     const response = {
       ok: true,
       data: {
@@ -590,8 +594,8 @@ function initApp(providedUserKey) {
         journals: journals || []
       }
     };
-    
-    log('=== INIT APP CONCLUÃDO ===');
+
+    log('=== INIT APP CONCLUÍDO ===');
     return response;
   }, { userKey: providedUserKey });
 }
@@ -616,7 +620,7 @@ function createHabit(userKey, habitData) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    
+
     createRecord('HABITS', habit);
     return { ok: true, data: habit };
   } catch (error) {
@@ -630,11 +634,11 @@ function updateHabit(userKey, habitId, updates) {
     if (habits.length === 0) {
       return { ok: false, error: 'Habit not found' };
     }
-    
+
     const updateData = {
       updatedAt: new Date().toISOString()
     };
-    
+
     if (updates.name) updateData.name = updates.name;
     if (updates.category) updateData.category = updates.category;
     if (updates.color) updateData.color = updates.color;
@@ -643,7 +647,7 @@ function updateHabit(userKey, habitId, updates) {
     if (updates.goalPerDay) updateData.goalPerDay = updates.goalPerDay;
     if (updates.reminderTime !== undefined) updateData.reminderTime = updates.reminderTime;
     if (updates.active !== undefined) updateData.active = updates.active;
-    
+
     updateRecord('HABITS', habitId, updateData);
     return { ok: true, data: { id: habitId, ...updateData } };
   } catch (error) {
@@ -657,12 +661,12 @@ function deleteHabit(userKey, habitId) {
     if (habits.length === 0) {
       return { ok: false, error: 'Habit not found' };
     }
-    
+
     deleteRecord('HABITS', habitId);
-    
+
     const logs = findRecords('HABIT_LOG', { habitId: habitId, userKey: userKey });
     logs.forEach(log => deleteRecord('HABIT_LOG', log.id));
-    
+
     return { ok: true, data: { id: habitId } };
   } catch (error) {
     return { ok: false, error: error.toString() };
@@ -675,9 +679,9 @@ function toggleHabitCompletion(userKey, habitId, date) {
     if (habits.length === 0) {
       return { ok: false, error: 'Habit not found' };
     }
-    
+
     const logs = findRecords('HABIT_LOG', { habitId: habitId, userKey: userKey, date: date });
-    
+
     if (logs.length > 0) {
       const newStatus = !logs[0].completed;
       updateRecord('HABIT_LOG', logs[0].id, { completed: newStatus });
@@ -728,14 +732,14 @@ function createTask(userKey, taskData) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    
+
     createRecord('TASKS', task);
-    
-    // Se for recorrente, gerar instÃ¢ncias
+
+    // Se for recorrente, gerar instâncias
     if (task.isRecurring) {
       generateRecurringTasks(userKey, { daysAhead: 30 });
     }
-    
+
     return { ok: true, data: task };
   } catch (error) {
     return { ok: false, error: error.toString() };
@@ -748,11 +752,11 @@ function updateTask(userKey, taskId, updates) {
     if (tasks.length === 0) {
       return { ok: false, error: 'Task not found' };
     }
-    
+
     const updateData = {
       updatedAt: new Date().toISOString()
     };
-    
+
     if (updates.title) updateData.title = updates.title;
     if (updates.description !== undefined) updateData.description = updates.description;
     if (updates.priority) updateData.priority = updates.priority;
@@ -766,14 +770,14 @@ function updateTask(userKey, taskId, updates) {
     if (updates.recurrenceTime !== undefined) updateData.recurrenceTime = updates.recurrenceTime;
     if (updates.recurrenceStartDate !== undefined) updateData.recurrenceStartDate = updates.recurrenceStartDate;
     if (updates.recurrenceEndDate !== undefined) updateData.recurrenceEndDate = updates.recurrenceEndDate;
-    
+
     updateRecord('TASKS', taskId, updateData);
-    
-    // Se alterou recorrÃªncia, regerar instÃ¢ncias
+
+    // Se alterou recorrência, regerar instâncias
     if (updates.isRecurring || updates.recurrenceDays || updates.recurrenceTime) {
       generateRecurringTasks(userKey, { daysAhead: 30 });
     }
-    
+
     return { ok: true, data: { id: taskId, ...updateData } };
   } catch (error) {
     return { ok: false, error: error.toString() };
@@ -786,16 +790,16 @@ function deleteTask(userKey, taskId) {
     if (tasks.length === 0) {
       return { ok: false, error: 'Task not found' };
     }
-    
+
     deleteRecord('TASKS', taskId);
-    
+
     const items = findRecords('TASK_CHECKLIST', { taskId: taskId, userKey: userKey });
     items.forEach(item => deleteRecord('TASK_CHECKLIST', item.id));
-    
-    // Se for template, deletar instÃ¢ncias
+
+    // Se for template, deletar instâncias
     const instances = findRecords('TASKS', { templateTaskId: taskId, userKey: userKey });
     instances.forEach(inst => deleteRecord('TASKS', inst.id));
-    
+
     return { ok: true, data: { id: taskId } };
   } catch (error) {
     return { ok: false, error: error.toString() };
@@ -816,7 +820,7 @@ function addChecklistItem(userKey, taskId, text) {
     if (tasks.length === 0) {
       return { ok: false, error: 'Task not found' };
     }
-    
+
     const item = {
       id: Utilities.getUuid(),
       taskId: taskId,
@@ -825,7 +829,7 @@ function addChecklistItem(userKey, taskId, text) {
       done: false,
       createdAt: new Date().toISOString()
     };
-    
+
     createRecord('TASK_CHECKLIST', item);
     return { ok: true, data: item };
   } catch (error) {
@@ -839,7 +843,7 @@ function toggleChecklistItem(userKey, itemId) {
     if (items.length === 0) {
       return { ok: false, error: 'Checklist item not found' };
     }
-    
+
     const newStatus = !items[0].done;
     updateRecord('TASK_CHECKLIST', itemId, { done: newStatus });
     return { ok: true, data: { id: itemId, done: newStatus } };
@@ -854,7 +858,7 @@ function deleteChecklistItem(userKey, itemId) {
     if (items.length === 0) {
       return { ok: false, error: 'Checklist item not found' };
     }
-    
+
     deleteRecord('TASK_CHECKLIST', itemId);
     return { ok: true, data: { id: itemId } };
   } catch (error) {
@@ -880,7 +884,7 @@ function createGoal(userKey, goalData) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    
+
     createRecord('GOALS', goal);
     return { ok: true, data: goal };
   } catch (error) {
@@ -894,18 +898,18 @@ function updateGoal(userKey, goalId, updates) {
     if (goals.length === 0) {
       return { ok: false, error: 'Goal not found' };
     }
-    
+
     const updateData = {
       updatedAt: new Date().toISOString()
     };
-    
+
     if (updates.title) updateData.title = updates.title;
     if (updates.metric) updateData.metric = updates.metric;
     if (updates.targetValue !== undefined) updateData.targetValue = updates.targetValue;
     if (updates.currentValue !== undefined) updateData.currentValue = updates.currentValue;
     if (updates.dueDate !== undefined) updateData.dueDate = updates.dueDate;
     if (updates.status) updateData.status = updates.status;
-    
+
     updateRecord('GOALS', goalId, updateData);
     return { ok: true, data: { id: goalId, ...updateData } };
   } catch (error) {
@@ -919,12 +923,12 @@ function deleteGoal(userKey, goalId) {
     if (goals.length === 0) {
       return { ok: false, error: 'Goal not found' };
     }
-    
+
     deleteRecord('GOALS', goalId);
-    
+
     const logs = findRecords('GOAL_LOG', { goalId: goalId, userKey: userKey });
     logs.forEach(log => deleteRecord('GOAL_LOG', log.id));
-    
+
     return { ok: true, data: { id: goalId } };
   } catch (error) {
     return { ok: false, error: error.toString() };
@@ -937,13 +941,13 @@ function addGoalProgress(userKey, goalId, delta, note, date) {
     if (goals.length === 0) {
       return { ok: false, error: 'Goal not found' };
     }
-    
+
     const currentValue = parseFloat(goals[0].currentValue) + parseFloat(delta);
-    updateRecord('GOALS', goalId, { 
+    updateRecord('GOALS', goalId, {
       currentValue: currentValue,
       updatedAt: new Date().toISOString()
     });
-    
+
     const log = {
       id: Utilities.getUuid(),
       goalId: goalId,
@@ -953,7 +957,7 @@ function addGoalProgress(userKey, goalId, delta, note, date) {
       date: date || new Date().toISOString().split('T')[0],
       createdAt: new Date().toISOString()
     };
-    
+
     createRecord('GOAL_LOG', log);
     return { ok: true, data: { goal: { id: goalId, currentValue: currentValue }, log: log } };
   } catch (error) {
@@ -968,7 +972,7 @@ function addGoalProgress(userKey, goalId, delta, note, date) {
 function upsertJournalEntry(userKey, date, mood, energy, note, gratitude) {
   try {
     const entries = findRecords('JOURNAL', { userKey: userKey, date: date });
-    
+
     if (entries.length > 0) {
       const updateData = {
         mood: mood,
@@ -1003,12 +1007,12 @@ function listJournalEntries(userKey, range) {
   try {
     const entries = findRecords('JOURNAL', { userKey: userKey });
     entries.sort((a, b) => b.date.localeCompare(a.date));
-    
+
     if (range && range.start && range.end) {
       const filtered = entries.filter(e => e.date >= range.start && e.date <= range.end);
       return { ok: true, data: filtered };
     }
-    
+
     return { ok: true, data: entries };
   } catch (error) {
     return { ok: false, error: error.toString() };
@@ -1022,11 +1026,11 @@ function listJournalEntries(userKey, range) {
 function exportUserData(userKey, format) {
   try {
     const data = initApp(userKey);
-    
+
     if (!data.ok) {
       return data;
     }
-    
+
     if (format === 'json') {
       const json = JSON.stringify(data.data, null, 2);
       return { ok: true, data: json, contentType: 'application/json', filename: 'routine_app_export.json' };
@@ -1054,7 +1058,7 @@ function exportUserData(userKey, format) {
 
       return { ok: true, data: csv, contentType: 'text/csv', filename: 'routine_app_export.csv' };
     }
-    
+
     return { ok: false, error: 'Invalid format' };
   } catch (error) {
     return { ok: false, error: error.toString() };
@@ -1065,7 +1069,7 @@ function exportUserData(userKey, format) {
 // CLICKUP INTEGRATION
 // ============================================
 
-// Constantes de configuraÃ§Ã£o
+// Constantes de configuração
 const CLICKUP_VIEW_ID = '6-901304433414-1';
 const CLICKUP_LIST_ID = '90131374592';
 const SYNC_INTERVAL_MIN = 10;
@@ -1075,13 +1079,13 @@ const CLICKUP_PAGE_SIZE = 100;
 const MAX_VIEW_PAGES = 200;
 
 /**
- * ObtÃ©m o token do ClickUp das Script Properties
+ * Obtém o token do ClickUp das Script Properties
  * NUNCA retornar token para o frontend - apenas uso interno
  */
 function getClickUpToken() {
   const token = PropertiesService.getScriptProperties().getProperty('CLICKUP_API_KEY');
   if (!token) {
-    throw new Error('Token do ClickUp nÃ£o configurado. Configure CLICKUP_API_KEY nas Script Properties.');
+    throw new Error('Token do ClickUp não configurado. Execute: Ferramentas > Editor de script > Propriedades do script e adicione CLICKUP_API_KEY com seu token pk_...');
   }
   return token;
 }
@@ -1113,34 +1117,40 @@ function testClickUpAuth() {
   });
 }
 /**
- * EXECUTAR UMA VEZ: Inicializa a integraÃ§Ã£o com ClickUp
- * Define o token e cria as estruturas necessÃ¡rias
+ * EXECUTAR UMA VEZ: Inicializa a integração com ClickUp
+ * Define o token e cria as estruturas necessárias
  */
 function initializeClickUpIntegration() {
   try {
-    // 1. Configurar token
-    const token = 'pk_87986690_9X1MC60UE18B1X9PEJFRMEFTT6GNHHFS';
-    setClickUpToken(token);
+    // Verificar se o token já existe
+    const existingToken = PropertiesService.getScriptProperties().getProperty('CLICKUP_API_KEY');
+    if (!existingToken) {
+      log('❌ Token do ClickUp não configurado');
+      return {
+        ok: false,
+        error: 'Token não encontrado. Configure o token executando: setClickUpToken("pk_seu_token_aqui")'
+      };
+    }
 
-    // 2. Criar sheets necessÃ¡rias
+    // Criar sheets necessárias
     ensureClickUpSheets();
 
-    // 3. Criar trigger automÃ¡tico
+    // Criar trigger automático
     createOrUpdateClickUpTrigger();
 
-    log('âœ… IntegraÃ§Ã£o ClickUp inicializada com sucesso!');
+    log('✅ Integração ClickUp inicializada com sucesso!');
 
     return {
       ok: true,
-      message: 'IntegraÃ§Ã£o configurada! Token salvo, sheets criadas e trigger ativado.',
+      message: 'Integração configurada! Token encontrado, sheets criadas e trigger ativado.',
       nextSteps: [
-        '1. Execute syncClickUpNow() para fazer a primeira sincronizaÃ§Ã£o',
+        '1. Execute syncClickUpNow() para fazer a primeira sincronização',
         '2. Verifique a aba CLICKUP_TASKS no Google Sheets',
-        '3. Configure mapeamento de usuÃ¡rios na aba MAPEAMENTO_USUARIOS (opcional)'
+        '3. Configure mapeamento de usuários na aba MAPEAMENTO_USUARIOS (opcional)'
       ]
     };
   } catch (error) {
-    log('âŒ Erro ao inicializar integraÃ§Ã£o', error.toString());
+    log('❌ Erro ao inicializar integração', error.toString());
     return { ok: false, error: error.toString() };
   }
 }
@@ -1168,7 +1178,8 @@ function clickupRequest(method, path, params, body) {
       'Authorization': token,
       'Content-Type': 'application/json'
     },
-    muteHttpExceptions: true
+    muteHttpExceptions: true,
+    timeout: 30000
   };
 
   if (body) {
@@ -1214,7 +1225,7 @@ function clickupRequest(method, path, params, body) {
         }
       }
 
-      // Client errors ou outras respostas - nÃ£o retry
+      // Client errors ou outras respostas - não retry
       let errorMsg = `ClickUp API erro ${statusCode}`;
       try {
         const errorData = JSON.parse(responseText);
@@ -1226,7 +1237,7 @@ function clickupRequest(method, path, params, body) {
       return { ok: false, error: errorMsg, statusCode: statusCode };
 
     } catch (e) {
-      log(`ExceÃ§Ã£o na requisiÃ§Ã£o ClickUp (tentativa ${attempt}): ${e.toString()}`);
+      log(`Exceção na requisição ClickUp (tentativa ${attempt}): ${e.toString()}`);
       if (attempt < MAX_RETRIES) {
         Utilities.sleep(RETRY_DELAY_MS * attempt);
         continue;
@@ -1235,11 +1246,11 @@ function clickupRequest(method, path, params, body) {
     }
   }
 
-  return { ok: false, error: 'MÃ¡ximo de tentativas excedido' };
+  return { ok: false, error: 'Máximo de tentativas excedido' };
 }
 
 /**
- * Busca tarefas da VIEW especÃ­fica do ClickUp com paginaÃ§Ã£o
+ * Busca tarefas da VIEW específica do ClickUp com paginação
  */
 function getClickUpViewTasks(viewId, includeClosed) {
   viewId = viewId || CLICKUP_VIEW_ID;
@@ -1355,7 +1366,7 @@ function getClickUpListTasks(listId, includeClosed) {
   return { ok: true, tasks: allTasks, totalPages: page };
 }
 /**
- * Garante que as abas necessÃ¡rias existam
+ * Garante que as abas necessárias existam
  */
 function ensureClickUpSheets() {
   const ss = getOrCreateSpreadsheet();
@@ -1428,7 +1439,7 @@ function ensureClickUpSheets() {
 }
 
 /**
- * Registra erro de sincronizaÃ§Ã£o
+ * Registra erro de sincronização
  */
 function logSyncError(functionName, method, endpoint, statusCode, message, page) {
   try {
@@ -1448,7 +1459,7 @@ function logSyncError(functionName, method, endpoint, statusCode, message, page)
 
     logSheet.appendRow(row);
 
-    // Manter apenas Ãºltimos 500 logs
+    // Manter apenas últimos 500 logs
     if (logSheet.getLastRow() > 501) {
       logSheet.deleteRows(2, logSheet.getLastRow() - 501);
     }
@@ -1458,7 +1469,7 @@ function logSyncError(functionName, method, endpoint, statusCode, message, page)
 }
 
 /**
- * Busca mapeamento de usuÃ¡rio ClickUp para interno
+ * Busca mapeamento de usuário ClickUp para interno
  */
 function getUserMapping(clickupUserId, clickupUsername) {
   try {
@@ -1487,7 +1498,7 @@ function getUserMapping(clickupUserId, clickupUsername) {
       }
     }
   } catch (e) {
-    log('Erro ao buscar mapeamento de usuÃ¡rio', e.toString());
+    log('Erro ao buscar mapeamento de usuário', e.toString());
   }
   return null;
 }
@@ -1602,7 +1613,7 @@ function syncClickUpViewToSheet() {
       upserted++;
     }
 
-    // Marcar tarefas que saÃ­ram da VIEW
+    // Marcar tarefas que saíram da VIEW
     let outOfView = 0;
     for (const existing of existingData) {
       if (!viewTaskIds.has(existing.taskId)) {
@@ -1624,7 +1635,7 @@ function syncClickUpViewToSheet() {
 
     const duration = new Date() - startTime;
 
-    log('SincronizaÃ§Ã£o com Sheet concluÃ­da', {
+    log('Sincronização com Sheet concluída', {
       fetched: tasks.length,
       upserted: upserted,
       updated: updated,
@@ -1665,7 +1676,7 @@ function syncClickUpToRoutine() {
     const data = clickupSheet.getDataRange().getValues();
     const headers = data[0];
 
-    // Ãndices das colunas
+    // Índices das colunas
     const taskIdIdx = headers.indexOf('task_id');
     const nameIdx = headers.indexOf('name');
     const statusIdx = headers.indexOf('status');
@@ -1712,7 +1723,7 @@ function syncClickUpToRoutine() {
       }
 
       try {
-        // Buscar se jÃ¡ existe tarefa interna vinculada
+        // Buscar se já existe tarefa interna vinculada
         const linkedTask = existingByClickUpId[taskId];
 
         // Determinar status interno baseado no status do ClickUp
@@ -1732,7 +1743,7 @@ function syncClickUpToRoutine() {
           else if (p === 'low') internalPriority = 'low';
         }
 
-        // Buscar mapeamento de usuÃ¡rio
+        // Buscar mapeamento de usuário
         let userKey = 'CLICKUP_SYNC';
         if (isEmailLike(responsavelEmail)) {
           userKey = responsavelEmail;
@@ -1817,7 +1828,7 @@ URL: Ver no ClickUp`,
 }
 
 /**
- * Orquestra toda a sincronizaÃ§Ã£o
+ * Orquestra toda a sincronização
  */
 function syncAll() {
   const startTime = new Date();
@@ -1849,7 +1860,7 @@ function syncAll() {
 
     log('=== SYNC CLICKUP COMPLETO ===', result);
 
-    // Salvar status do Ãºltimo sync
+    // Salvar status do último sync
     PropertiesService.getScriptProperties().setProperty('LAST_CLICKUP_SYNC', JSON.stringify({
       timestamp: result.timestamp,
       success: true,
@@ -1877,7 +1888,7 @@ function syncAll() {
 }
 
 /**
- * FunÃ§Ã£o exposta para o frontend - SincronizaÃ§Ã£o manual
+ * Função exposta para o frontend - Sincronização manual
  */
 function syncClickUpNow() {
   return safeExecute('syncClickUpNow', () => {
@@ -1886,7 +1897,7 @@ function syncClickUpNow() {
 }
 
 /**
- * ObtÃ©m status da Ãºltima sincronizaÃ§Ã£o
+ * Obtém status da última sincronização
  */
 function getLastSyncStatus() {
   try {
@@ -2048,7 +2059,7 @@ function listClickUpTasks(options) {
 }
 
 /**
- * Cria ou atualiza trigger automÃ‡Â­tico de sincronizaÃ‡ÃµÃ‡Å“o
+ * Cria ou atualiza trigger automático de sincronização
  */
 function createOrUpdateClickUpTrigger() {
   try {
@@ -2066,7 +2077,7 @@ function createOrUpdateClickUpTrigger() {
       .everyMinutes(SYNC_INTERVAL_MIN)
       .create();
 
-    log(`Trigger criado: sincronizaÃ§Ã£o a cada ${SYNC_INTERVAL_MIN} minutos`);
+    log(`Trigger criado: sincronização a cada ${SYNC_INTERVAL_MIN} minutos`);
 
     return { ok: true, message: `Trigger criado com sucesso (${SYNC_INTERVAL_MIN} min)` };
   } catch (error) {
@@ -2076,7 +2087,7 @@ function createOrUpdateClickUpTrigger() {
 }
 
 /**
- * Remove trigger automÃ¡tico
+ * Remove trigger automático
  */
 function removeClickUpTrigger() {
   try {
@@ -2096,4 +2107,3 @@ function removeClickUpTrigger() {
     return { ok: false, error: error.toString() };
   }
 }
-
