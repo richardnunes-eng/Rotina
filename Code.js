@@ -1278,23 +1278,38 @@ function ensureClickUpSheets() {
   const ss = getOrCreateSpreadsheet();
 
   // Aba CLICKUP_TASKS
+  const requiredHeaders = [
+    'task_id', 'task_url', 'name', 'status', 'priority',
+    'assignees', 'responsavel_principal', 'responsavel_email', 'due_date', 'start_date',
+    'date_created', 'date_updated', 'date_closed',
+    'time_estimate', 'time_spent', 'tags',
+    'custom_fields', 'list_id', 'list_name', 'folder_id', 'space_id',
+    'fora_da_view', 'last_sync_at'
+  ];
+
   let tasksSheet = ss.getSheetByName('CLICKUP_TASKS');
   if (!tasksSheet) {
     tasksSheet = ss.insertSheet('CLICKUP_TASKS');
-    const headers = [
-      'task_id', 'task_url', 'name', 'status', 'priority',
-      'assignees', 'responsavel_principal', 'due_date', 'start_date',
-      'date_created', 'date_updated', 'date_closed',
-      'time_estimate', 'time_spent', 'tags',
-      'custom_fields', 'list_id', 'list_name', 'folder_id', 'space_id',
-      'fora_da_view', 'last_sync_at'
-    ];
-    tasksSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    tasksSheet.getRange(1, 1, 1, headers.length)
+  }
+
+  if (tasksSheet.getLastRow() < 1) {
+    tasksSheet.getRange(1, 1, 1, requiredHeaders.length).setValues([requiredHeaders]);
+    tasksSheet.getRange(1, 1, 1, requiredHeaders.length)
       .setFontWeight('bold')
       .setBackground('#4285f4')
       .setFontColor('#ffffff');
     tasksSheet.setFrozenRows(1);
+  } else {
+    const headerRow = tasksSheet.getRange(1, 1, 1, tasksSheet.getLastColumn()).getValues()[0];
+    const missingHeaders = requiredHeaders.filter(header => headerRow.indexOf(header) === -1);
+    if (missingHeaders.length > 0) {
+      const startCol = headerRow.length + 1;
+      tasksSheet.getRange(1, startCol, 1, missingHeaders.length).setValues([missingHeaders]);
+      tasksSheet.getRange(1, startCol, 1, missingHeaders.length)
+        .setFontWeight('bold')
+        .setBackground('#4285f4')
+        .setFontColor('#ffffff');
+    }
   }
 
   // Aba LOG_SYNC
@@ -1416,18 +1431,22 @@ function syncClickUpViewToSheet() {
     const tasks = result.tasks;
     const timestamp = new Date().toISOString();
 
+    const headers = tasksSheet.getRange(1, 1, 1, tasksSheet.getLastColumn()).getValues()[0];
+    const taskIdIndex = headers.indexOf('task_id');
+    if (taskIdIndex === -1) {
+      throw new Error('Sheet CLICKUP_TASKS sem coluna task_id.');
+    }
+
     // Obter dados existentes
     let existingData = [];
-    let existingTaskIds = new Set();
+    const existingById = {};
 
     if (tasksSheet.getLastRow() > 1) {
       const data = tasksSheet.getDataRange().getValues();
-      const headers = data[0];
-      const taskIdIndex = headers.indexOf('task_id');
 
       for (let i = 1; i < data.length; i++) {
         const taskId = String(data[i][taskIdIndex]);
-        existingTaskIds.add(taskId);
+        existingById[taskId] = { rowIndex: i + 1, rowValues: data[i] };
         existingData.push({ rowIndex: i + 1, taskId: taskId });
       }
     }
@@ -1442,52 +1461,59 @@ function syncClickUpViewToSheet() {
     // Processar cada tarefa
     for (const task of tasks) {
       const assigneeNames = (task.assignees || []).map(a => a.username || a.email || a.id).join(', ');
-      const assigneeIds = (task.assignees || []).map(a => a.id).join(', ');
       const responsavelPrincipal = task.assignees && task.assignees.length > 0
         ? (task.assignees[0].username || task.assignees[0].email || task.assignees[0].id)
+        : '';
+      const responsavelEmail = task.assignees && task.assignees.length > 0
+        ? (task.assignees[0].email || '')
         : '';
 
       const tags = (task.tags || []).map(t => t.name).join(', ');
       const customFields = task.custom_fields ? JSON.stringify(task.custom_fields).substring(0, 500) : '';
 
-      const rowData = [
-        task.id,
-        task.url || '',
-        task.name || '',
-        task.status ? task.status.status : '',
-        task.priority ? task.priority.priority : '',
-        assigneeNames,
-        responsavelPrincipal,
-        task.due_date || '',
-        task.start_date || '',
-        task.date_created || '',
-        task.date_updated || '',
-        task.date_closed || '',
-        task.time_estimate || '',
-        task.time_spent || '',
-        tags,
-        customFields,
-        task.list ? task.list.id : '',
-        task.list ? task.list.name : '',
-        task.folder ? task.folder.id : '',
-        task.space ? task.space.id : '',
-        false, // fora_da_view = false
-        timestamp
-      ];
+      const rowRecord = {
+        task_id: task.id,
+        task_url: task.url || '',
+        name: task.name || '',
+        status: task.status ? task.status.status : '',
+        priority: task.priority ? task.priority.priority : '',
+        assignees: assigneeNames,
+        responsavel_principal: responsavelPrincipal,
+        responsavel_email: responsavelEmail,
+        due_date: task.due_date || '',
+        start_date: task.start_date || '',
+        date_created: task.date_created || '',
+        date_updated: task.date_updated || '',
+        date_closed: task.date_closed || '',
+        time_estimate: task.time_estimate || '',
+        time_spent: task.time_spent || '',
+        tags: tags,
+        custom_fields: customFields,
+        list_id: task.list ? task.list.id : '',
+        list_name: task.list ? task.list.name : '',
+        folder_id: task.folder ? task.folder.id : '',
+        space_id: task.space ? task.space.id : '',
+        fora_da_view: false,
+        last_sync_at: timestamp
+      };
 
-      // Verificar se já existe
-      const existing = existingData.find(e => e.taskId === task.id);
+      const existing = existingById[task.id];
 
       if (existing) {
+        const rowData = headers.map((header, idx) => (
+          Object.prototype.hasOwnProperty.call(rowRecord, header) ? rowRecord[header] : existing.rowValues[idx]
+        ));
         // Atualizar linha existente
         tasksSheet.getRange(existing.rowIndex, 1, 1, rowData.length).setValues([rowData]);
         updated++;
       } else {
+        const rowData = headers.map(header => (
+          Object.prototype.hasOwnProperty.call(rowRecord, header) ? rowRecord[header] : ''
+        ));
         // Inserir nova linha
         tasksSheet.appendRow(rowData);
         inserted++;
       }
-
       upserted++;
     }
 
@@ -1559,9 +1585,25 @@ function syncClickUpToRoutine() {
     const nameIdx = headers.indexOf('name');
     const statusIdx = headers.indexOf('status');
     const responsavelIdx = headers.indexOf('responsavel_principal');
+    const responsavelEmailIdx = headers.indexOf('responsavel_email');
     const dueDateIdx = headers.indexOf('due_date');
     const foraViewIdx = headers.indexOf('fora_da_view');
     const priorityIdx = headers.indexOf('priority');
+
+    const clickupTagPattern = /\[ClickUp:([^\]]+)\]/;
+    const existingTasks = findRecords('TASKS', {});
+    const existingByClickUpId = {};
+    existingTasks.forEach(task => {
+      if (!task.description) return;
+      const match = String(task.description).match(clickupTagPattern);
+      if (match && match[1]) {
+        existingByClickUpId[String(match[1])] = task;
+      }
+    });
+
+    function isEmailLike(value) {
+      return typeof value === 'string' && value.indexOf('@') !== -1;
+    }
 
     let synced = 0;
     let skipped = 0;
@@ -1573,6 +1615,7 @@ function syncClickUpToRoutine() {
       const name = row[nameIdx];
       const status = row[statusIdx];
       const responsavel = row[responsavelIdx];
+      const responsavelEmail = responsavelEmailIdx >= 0 ? String(row[responsavelEmailIdx] || '').trim() : '';
       const dueDate = row[dueDateIdx];
       const foraView = row[foraViewIdx];
       const priority = row[priorityIdx];
@@ -1585,13 +1628,7 @@ function syncClickUpToRoutine() {
 
       try {
         // Buscar se já existe tarefa interna vinculada
-        const existingTasks = findRecords('TASKS', {
-          userKey: 'CLICKUP_SYNC', // Usar userKey especial para tarefas do ClickUp
-        });
-
-        const linkedTask = existingTasks.find(t =>
-          t.description && t.description.includes(`[ClickUp:${taskId}]`)
-        );
+        const linkedTask = existingByClickUpId[taskId];
 
         // Determinar status interno baseado no status do ClickUp
         let internalStatus = 'open';
@@ -1612,8 +1649,12 @@ function syncClickUpToRoutine() {
 
         // Buscar mapeamento de usuário
         let userKey = 'CLICKUP_SYNC';
-        if (responsavel) {
-          const mapping = getUserMapping('', responsavel);
+        if (isEmailLike(responsavelEmail)) {
+          userKey = responsavelEmail;
+        } else if (isEmailLike(responsavel)) {
+          userKey = String(responsavel).trim();
+        } else if (responsavel) {
+          const mapping = getUserMapping('', String(responsavel));
           if (mapping && mapping.emailInterno) {
             userKey = mapping.emailInterno;
           }
@@ -1630,14 +1671,18 @@ function syncClickUpToRoutine() {
 
         if (linkedTask) {
           // Atualizar tarefa existente
-          updateRecord('TASKS', linkedTask.id, {
+          const updates = {
             title: taskData.title,
             description: taskData.description,
             priority: taskData.priority,
             dueDate: taskData.dueDate,
             status: taskData.status,
             updatedAt: new Date().toISOString()
-          });
+          };
+          if (linkedTask.userKey === 'CLICKUP_SYNC' && userKey !== 'CLICKUP_SYNC') {
+            updates.userKey = userKey;
+          }
+          updateRecord('TASKS', linkedTask.id, updates);
         } else {
           // Criar nova tarefa
           const newTask = {
@@ -1660,6 +1705,7 @@ function syncClickUpToRoutine() {
           };
 
           createRecord('TASKS', newTask);
+          existingByClickUpId[taskId] = newTask;
         }
 
         synced++;
@@ -1834,6 +1880,7 @@ function listClickUpTasks(options) {
         const haystack = [
           record.name,
           record.responsavel_principal,
+          record.responsavel_email,
           record.status,
           record.priority,
           record.assignees
@@ -1863,6 +1910,7 @@ function listClickUpTasks(options) {
       status: record.status,
       priority: record.priority,
       responsavel_principal: record.responsavel_principal,
+      responsavel_email: record.responsavel_email,
       due_date: record.due_date,
       date_updated: record.date_updated,
       fora_da_view: record.fora_da_view
