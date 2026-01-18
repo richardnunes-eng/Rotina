@@ -466,18 +466,28 @@ function generateRecurringTasks(userKey, options) {
 
 function doGet() {
   // Verificar se o usuário está autenticado
-  const userEmail = Session.getActiveUser().getEmail();
+  let userEmail = '';
+
+  try {
+    userEmail = Session.getActiveUser().getEmail();
+  } catch (e) {
+    // Falha ao obter email - não autenticado
+    log('Erro ao obter email do usuário', e.toString());
+  }
 
   // Se não houver email, significa que não está autenticado
-  // Retornar página de autenticação
+  // Retornar página bootstrap que força login padrão do Google
   if (!userEmail) {
-    return HtmlService.createTemplateFromFile('auth')
+    log('Usuário não autenticado, redirecionando para bootstrap');
+    return HtmlService.createTemplateFromFile('bootstrap')
       .evaluate()
-      .setTitle('THX Ops - Login')
-      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+      .setTitle('THX Ops - Autenticação')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
 
   // Se autenticado, mostrar o app normal
+  log('Usuário autenticado', userEmail);
   return HtmlService.createTemplateFromFile('index')
     .evaluate()
     .setTitle('THX Ops')
@@ -496,21 +506,38 @@ function getSessionInfo() {
     // Tentar obter email do usuário ativo
     try {
       email = Session.getActiveUser().getEmail();
+
+      // Validar que o email é realmente válido (não vazio)
+      if (!email || email.trim() === '') {
+        email = null;
+      }
     } catch (e) {
+      log('Erro ao obter Session.getActiveUser().getEmail()', e.toString());
+
       // Se falhar, tentar método alternativo
       try {
         email = Session.getEffectiveUser().getEmail();
+
+        if (!email || email.trim() === '') {
+          email = null;
+        }
       } catch (e2) {
+        log('Erro ao obter Session.getEffectiveUser().getEmail()', e2.toString());
         // Ambos os métodos falharam
       }
     }
 
+    const isLoggedIn = !!email;
+
+    log('getSessionInfo resultado', { loggedIn: isLoggedIn, email: email });
+
     return {
       ok: true,
-      loggedIn: !!email,
+      loggedIn: isLoggedIn,
       email: email || null
     };
   } catch (error) {
+    log('Erro geral em getSessionInfo', error.toString());
     return {
       ok: true,
       loggedIn: false,

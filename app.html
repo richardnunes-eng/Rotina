@@ -1632,28 +1632,37 @@
       const sessionInfo = await api.call('getSessionInfo');
 
       if (!sessionInfo.ok || !sessionInfo.loggedIn) {
-        console.warn('Usuário não autenticado, redirecionando...');
+        console.warn('Usuário não autenticado, redirecionando para login do Google...');
 
-        // Redirecionar para tela de login
+        // Evitar loop se já estivermos no bootstrap
+        if (window.location.pathname && window.location.pathname.includes('bootstrap')) {
+          console.log('Já estamos no bootstrap, não redirecionar novamente');
+          return false;
+        }
+
+        // Redirecionar para forçar login padrão do Google
+        // O backend vai detectar que não está logado e retornar bootstrap.html
         if (window.self !== window.top) {
           try {
+            console.log('Em iframe, tentando window.top.location');
             window.top.location.href = window.location.href;
           } catch (e) {
-            // Se não conseguir acessar window.top (CORS), apenas recarregar
+            console.warn('Não conseguiu acessar window.top (CORS), recarregando:', e);
             window.location.reload();
           }
         } else {
+          console.log('Recarregando para mostrar bootstrap e forçar login Google');
           window.location.reload();
         }
 
         return false;
       }
 
-      console.log('Autenticação verificada:', sessionInfo.email);
+      console.log('✅ Autenticação verificada:', sessionInfo.email);
       return true;
 
     } catch (error) {
-      console.error('Erro ao verificar autenticação:', error);
+      console.error('❌ Erro ao verificar autenticação:', error);
 
       // Em caso de erro, mostrar mensagem ao invés de tela branca
       const appContainer = document.getElementById('app');
@@ -1667,7 +1676,7 @@
             <span class="material-icons" style="font-size: 64px; color: var(--error-color); margin-bottom: 20px;">error_outline</span>
             <h2 style="color: var(--text-primary); margin-bottom: 12px;">Erro ao carregar aplicativo</h2>
             <p style="color: var(--text-secondary); margin-bottom: 24px;">
-              Não foi possível verificar sua autenticação. Tente recarregar a página ou fazer login novamente.
+              Não foi possível verificar sua autenticação. Tente recarregar a página.
             </p>
             <button class="btn btn-primary" onclick="location.reload()">
               <span class="material-icons">refresh</span>
