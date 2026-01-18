@@ -913,6 +913,26 @@
               Exportar Dados
             </button>
           </div>
+
+          <div class="card mt-md">
+            <h3 class="mb-md">Integração ClickUp</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 16px; font-size: 14px;">
+              Sincronize automaticamente tarefas da sua VIEW do ClickUp
+            </p>
+
+            <div id="clickup-status" class="mb-md"></div>
+
+            <div class="flex gap-sm">
+              <button class="btn btn-primary" onclick="clickupHandlers.syncNow()" id="clickup-sync-btn" style="flex: 1;">
+                <span class="material-icons">sync</span>
+                Sincronizar Agora
+              </button>
+              <button class="btn btn-secondary" onclick="clickupHandlers.checkStatus()">
+                <span class="material-icons">info</span>
+                Status
+              </button>
+            </div>
+          </div>
         </div>
       `;
 
@@ -923,6 +943,9 @@
           storage.save('theme', e.target.value);
         });
       }
+
+      // Carregar status do ClickUp automaticamente
+      clickupHandlers.checkStatus();
     }
   };
 
@@ -1601,6 +1624,121 @@
     }
   };
 
+  const clickupHandlers = {
+    syncNow: async function() {
+      const btn = document.getElementById('clickup-sync-btn');
+      const statusDiv = document.getElementById('clickup-status');
+
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="material-icons">hourglass_empty</span> Sincronizando...';
+      }
+
+      toast.info('Iniciando sincronização com ClickUp...');
+
+      try {
+        const result = await api.call('syncClickUpNow');
+
+        if (result.ok) {
+          const sheet = result.sheet || {};
+          const routine = result.routine || {};
+
+          const summary = `
+            ✅ Sincronização concluída!<br>
+            📥 ${sheet.fetched || 0} tarefas obtidas do ClickUp<br>
+            💾 ${sheet.upserted || 0} salvas no banco (${sheet.inserted || 0} novas, ${sheet.updated || 0} atualizadas)<br>
+            🔗 ${routine.synced || 0} sincronizadas com rotinas internas<br>
+            ⏱️ Tempo: ${Math.round((result.totalDurationMs || 0) / 1000)}s
+          `;
+
+          if (statusDiv) {
+            statusDiv.innerHTML = `
+              <div style="padding: 12px; background: rgba(52, 168, 83, 0.1); border-left: 3px solid #34a853; border-radius: 4px;">
+                <div style="font-size: 13px; line-height: 1.6;">${summary}</div>
+                <small style="color: var(--text-tertiary); margin-top: 8px; display: block;">
+                  Última sincronização: ${new Date().toLocaleString('pt-BR')}
+                </small>
+              </div>
+            `;
+          }
+
+          toast.success('Sincronização concluída!');
+        } else {
+          toast.error('Erro na sincronização: ' + (result.error || 'Erro desconhecido'));
+
+          if (statusDiv) {
+            statusDiv.innerHTML = `
+              <div style="padding: 12px; background: rgba(234, 67, 53, 0.1); border-left: 3px solid #ea4335; border-radius: 4px;">
+                <div style="font-size: 13px; color: var(--error-color);">
+                  ❌ Erro: ${utils.sanitize(result.error || 'Erro desconhecido')}
+                </div>
+              </div>
+            `;
+          }
+        }
+      } catch (error) {
+        console.error('Erro ao sincronizar ClickUp:', error);
+        toast.error('Erro ao sincronizar: ' + error.toString());
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<span class="material-icons">sync</span> Sincronizar Agora';
+        }
+      }
+    },
+
+    checkStatus: async function() {
+      const statusDiv = document.getElementById('clickup-status');
+      if (!statusDiv) return;
+
+      try {
+        const result = await api.call('getLastSyncStatus');
+
+        if (result.ok && result.lastSync) {
+          const sync = result.lastSync;
+          const timestamp = new Date(sync.timestamp).toLocaleString('pt-BR');
+
+          if (sync.success) {
+            const summary = sync.summary || {};
+            statusDiv.innerHTML = `
+              <div style="padding: 12px; background: rgba(52, 168, 83, 0.1); border-left: 3px solid #34a853; border-radius: 4px;">
+                <div style="font-size: 13px;">
+                  ✅ Última sincronização bem-sucedida<br>
+                  📊 ${summary.fetched || 0} tarefas | ${summary.synced || 0} sincronizadas | ${Math.round((summary.duration || 0) / 1000)}s
+                </div>
+                <small style="color: var(--text-tertiary); margin-top: 8px; display: block;">
+                  ${timestamp}
+                </small>
+              </div>
+            `;
+          } else {
+            statusDiv.innerHTML = `
+              <div style="padding: 12px; background: rgba(234, 67, 53, 0.1); border-left: 3px solid #ea4335; border-radius: 4px;">
+                <div style="font-size: 13px; color: var(--error-color);">
+                  ❌ Última sincronização falhou<br>
+                  ${utils.sanitize(sync.error || 'Erro desconhecido')}
+                </div>
+                <small style="color: var(--text-tertiary); margin-top: 8px; display: block;">
+                  ${timestamp}
+                </small>
+              </div>
+            `;
+          }
+        } else {
+          statusDiv.innerHTML = `
+            <div style="padding: 12px; background: rgba(251, 188, 5, 0.1); border-left: 3px solid #fbbc05; border-radius: 4px;">
+              <div style="font-size: 13px;">
+                ℹ️ Nenhuma sincronização realizada ainda
+              </div>
+            </div>
+          `;
+        }
+      } catch (error) {
+        console.error('Erro ao verificar status:', error);
+      }
+    }
+  };
+
   const authHandlers = {
     logout: function() {
       if (confirm('Tem certeza que deseja sair?')) {
@@ -1616,6 +1754,7 @@
   window.taskHandlers = taskHandlers;
   window.goalHandlers = goalHandlers;
   window.settingsHandlers = settingsHandlers;
+  window.clickupHandlers = clickupHandlers;
   window.authHandlers = authHandlers;
   window.router = router;
   window.utils = utils;
