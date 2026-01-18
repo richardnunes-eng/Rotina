@@ -1,0 +1,2199 @@
+<script>
+// ============================================
+// ROUTINE APP - Frontend JavaScript
+// ============================================
+
+(function() {
+  'use strict';
+
+  // ============================================
+// ADICIONAR LOGO APÓS (function() { 'use strict';
+// ============================================
+
+const diagnostics = {
+  lastCall: null,
+  lastResponse: null,
+  lastError: null,
+  history: []
+};
+
+function recordDiagnostic(type, data) {
+  const entry = { type, data, timestamp: new Date().toISOString() };
+  if (type === 'call') diagnostics.lastCall = entry;
+  if (type === 'response') diagnostics.lastResponse = entry;
+  if (type === 'error') diagnostics.lastError = entry;
+  diagnostics.history.unshift(entry);
+  if (diagnostics.history.length > 50) diagnostics.history = diagnostics.history.slice(0, 50);
+}
+
+const callServer = {
+  execute: function(fnName, args, timeoutMs) {
+    timeoutMs = timeoutMs || 30000;
+    args = args || [];
+    
+    recordDiagnostic('call', { fnName, args });
+    console.log(`[callServer] Chamando ${fnName}`, args);
+    
+    return new Promise((resolve, reject) => {
+      let timedOut = false;
+      
+      const timer = setTimeout(() => {
+        timedOut = true;
+        const error = { ok: false, error: `Timeout: ${fnName}`, errorType: 'TIMEOUT' };
+        recordDiagnostic('error', error);
+        reject(error);
+      }, timeoutMs);
+      
+      if (typeof google === 'undefined' || !google.script || !google.script.run) {
+        clearTimeout(timer);
+        const error = { ok: false, error: 'google.script.run não disponível', errorType: 'NO_GOOGLE_SCRIPT' };
+        recordDiagnostic('error', error);
+        reject(error);
+        return;
+      }
+      
+      const onSuccess = (response) => {
+        if (timedOut) return;
+        clearTimeout(timer);
+        
+        if (response === null || response === undefined) {
+          const error = { ok: false, error: `${fnName} retornou null/undefined`, rawResponse: response };
+          recordDiagnostic('error', error);
+          reject(error);
+          return;
+        }
+        
+        if (typeof response !== 'object') {
+          const error = { ok: false, error: `${fnName} retornou tipo inválido`, rawResponse: response };
+          recordDiagnostic('error', error);
+          reject(error);
+          return;
+        }
+        
+        if (typeof response.ok !== 'boolean') {
+          response = { ok: true, data: response };
+        }
+        
+        recordDiagnostic('response', response);
+        resolve(response);
+      };
+      
+      const onFailure = (error) => {
+        if (timedOut) return;
+        clearTimeout(timer);
+        const errorObj = { ok: false, error: error.message || error.toString(), rawError: error };
+        recordDiagnostic('error', errorObj);
+        reject(errorObj);
+      };
+      
+      try {
+        google.script.run
+          .withSuccessHandler(onSuccess)
+          .withFailureHandler(onFailure)
+          [fnName](...args);
+      } catch (e) {
+        clearTimeout(timer);
+        const error = { ok: false, error: 'Exceção: ' + e.toString() };
+        recordDiagnostic('error', error);
+        reject(error);
+      }
+    });
+  },
+  
+  ping: function() {
+    return this.execute('ping', []);
+  }
+};
+
+window.showDiagnostics = function() {
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal" style="max-width: 900px">
+      <div class="modal-header">
+        <h2>🔧 Diagnóstico</h2>
+        <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="card mb-lg">
+          <h3>Status do Servidor</h3>
+          <button class="btn btn-primary" onclick="callServer.ping().then(r => alert(JSON.stringify(r, null, 2)))">Testar Ping</button>
+        </div>
+        <div class="card mb-lg">
+          <h3>Última Chamada</h3>
+          <pre style="background: #f5f5f5; padding: 12px; overflow: auto; max-height: 200px">${JSON.stringify(diagnostics.lastCall, null, 2)}</pre>
+        </div>
+        <div class="card mb-lg">
+          <h3>Última Resposta</h3>
+          <pre style="background: #f5f5f5; padding: 12px; overflow: auto; max-height: 200px">${JSON.stringify(diagnostics.lastResponse, null, 2)}</pre>
+        </div>
+        <div class="card">
+          <h3>Último Erro</h3>
+          <pre style="background: #f5f5f5; padding: 12px; overflow: auto; max-height: 200px; color: red">${JSON.stringify(diagnostics.lastError, null, 2)}</pre>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+};
+
+window.diagnostics = diagnostics;
+window.callServer = callServer;
+
+// ============================================
+// FIM DA ADIÇÃO - Continue com seu código existente
+// ============================================
+
+  // ============================================
+  // STATE MANAGEMENT
+  // ============================================
+  
+  const appState = {
+    userKey: null,
+    habits: [],
+    habitLogs: [],
+    tasks: [],
+    taskChecklists: [],
+    goals: [],
+    goalLogs: [],
+    journals: [],
+    currentView: 'dashboard',
+    isLoading: false,
+    isOffline: false,
+    preferences: {
+      theme: 'light',
+      weekStart: 'monday',
+      timeFormat: '24h',
+      reduceAnimations: false
+    }
+  };
+
+  // ============================================
+  // UTILITIES
+  // ============================================
+
+  const utils = {
+    // Sanitização de strings
+    sanitize: function(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    },
+    
+    // Formatação de data
+    formatDate: function(dateStr) {
+      if (!dateStr) return '';
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('pt-BR');
+    },
+    
+    // Obter data de hoje em formato ISO
+    getTodayISO: function() {
+      return new Date().toISOString().split('T')[0];
+    },
+    
+    // Diferença de dias
+    daysBetween: function(date1, date2) {
+      const d1 = new Date(date1);
+      const d2 = new Date(date2);
+      const diff = Math.abs(d2 - d1);
+      return Math.ceil(diff / (1000 * 60 * 60 * 24));
+    },
+    
+    // Calcular streak
+    calculateStreak: function(logs, habitId) {
+      const sortedLogs = logs
+        .filter(l => l.habitId === habitId && l.completed)
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
+      
+      if (sortedLogs.length === 0) return { current: 0, max: 0 };
+      
+      let currentStreak = 0;
+      let maxStreak = 0;
+      let tempStreak = 0;
+      let expectedDate = new Date(this.getTodayISO());
+      
+      for (let i = 0; i < sortedLogs.length; i++) {
+        const logDate = new Date(sortedLogs[i].date);
+        
+        if (i === 0) {
+          const daysDiff = this.daysBetween(logDate, expectedDate);
+          if (daysDiff <= 1) {
+            currentStreak = 1;
+            tempStreak = 1;
+          }
+        }
+        
+        if (i > 0) {
+          const prevDate = new Date(sortedLogs[i-1].date);
+          const daysDiff = this.daysBetween(logDate, prevDate);
+          
+          if (daysDiff === 1) {
+            tempStreak++;
+            if (i === 0 || currentStreak > 0) {
+              currentStreak = tempStreak;
+            }
+          } else {
+            tempStreak = 1;
+            currentStreak = 0;
+          }
+        }
+        
+        maxStreak = Math.max(maxStreak, tempStreak);
+      }
+      
+      return { current: currentStreak, max: maxStreak };
+    },
+    
+    // Debounce
+    debounce: function(func, wait) {
+      let timeout;
+      return function executedFunction(...args) {
+        const later = () => {
+          clearTimeout(timeout);
+          func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
+    },
+    
+    // Gerar ID local temporário
+    generateTempId: function() {
+      return 'temp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    }
+  };
+
+  // ============================================
+  // LOCAL STORAGE
+  // ============================================
+
+  const storage = {
+    save: function(key, data) {
+      try {
+        localStorage.setItem(key, JSON.stringify(data));
+      } catch (e) {
+        console.error('Error saving to localStorage:', e);
+      }
+    },
+    
+    load: function(key) {
+      try {
+        const data = localStorage.getItem(key);
+        return data ? JSON.parse(data) : null;
+      } catch (e) {
+        console.error('Error loading from localStorage:', e);
+        return null;
+      }
+    },
+    
+    remove: function(key) {
+      try {
+        localStorage.removeItem(key);
+      } catch (e) {
+        console.error('Error removing from localStorage:', e);
+      }
+    }
+  };
+
+  // ============================================
+  // TOAST NOTIFICATIONS
+  // ============================================
+
+  const toast = {
+    show: function(message, type = 'info', duration = 3000) {
+      const container = document.getElementById('toast-container');
+      
+      const toastEl = document.createElement('div');
+      toastEl.className = `toast ${type}`;
+      
+      const icons = {
+        success: 'check_circle',
+        error: 'error',
+        info: 'info'
+      };
+      
+      toastEl.innerHTML = `
+        <span class="material-icons toast-icon">${icons[type] || 'info'}</span>
+        <div class="toast-content">
+          <div class="toast-message">${utils.sanitize(message)}</div>
+        </div>
+      `;
+      
+      container.appendChild(toastEl);
+      
+      setTimeout(() => {
+        toastEl.style.animation = 'slideIn 0.3s ease reverse';
+        setTimeout(() => toastEl.remove(), 300);
+      }, duration);
+    },
+    
+    success: function(message) {
+      this.show(message, 'success');
+    },
+    
+    error: function(message) {
+      this.show(message, 'error', 4000);
+    },
+    
+    info: function(message) {
+      this.show(message, 'info');
+    }
+  };
+
+  // ============================================
+  // MODAL
+  // ============================================
+
+  const modal = {
+    open: function(title, content, actions = []) {
+      const container = document.getElementById('modal-container');
+      
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      
+      const actionsHTML = actions.map(action => {
+        const btnClass = action.primary ? 'btn-primary' : 'btn-secondary';
+        return `<button class="btn ${btnClass}" onclick="${action.onclick}">${action.label}</button>`;
+      }).join('');
+      
+      overlay.innerHTML = `
+        <div class="modal">
+          <div class="modal-header">
+            <h2 class="modal-title">${utils.sanitize(title)}</h2>
+            <button class="modal-close" onclick="modal.close()">
+              <span class="material-icons">close</span>
+            </button>
+          </div>
+          <div class="modal-body">
+            ${content}
+          </div>
+          ${actions.length > 0 ? `
+            <div class="modal-footer">
+              ${actionsHTML}
+            </div>
+          ` : ''}
+        </div>
+      `;
+      
+      container.innerHTML = '';
+      container.appendChild(overlay);
+      
+      // Fechar ao clicar fora
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+          this.close();
+        }
+      });
+    },
+    
+    close: function() {
+      const container = document.getElementById('modal-container');
+      container.innerHTML = '';
+    }
+  };
+
+  // Expor modal globalmente para uso nos buttons
+  window.modal = modal;
+
+  // ============================================
+  // API CALLS
+  // ============================================
+
+  const api = {
+    call: function(functionName, ...args) {
+      return new Promise((resolve) => {
+        try {
+          // Verificar se google.script.run está disponível
+          if (typeof google === 'undefined' || !google.script || !google.script.run) {
+            console.error('google.script.run não está disponível');
+            resolve({ ok: false, error: 'Ambiente de execução não disponível' });
+            return;
+          }
+          
+          google.script.run
+            .withSuccessHandler((result) => {
+              // Se result é null ou undefined, retornar erro
+              if (result === null || result === undefined) {
+                resolve({ ok: false, error: 'Resposta vazia do servidor' });
+              } else {
+                resolve(result);
+              }
+            })
+            .withFailureHandler((error) => {
+              console.error('Erro na chamada API:', error);
+              resolve({ ok: false, error: error.message || error.toString() });
+            })
+            [functionName](...args);
+        } catch (error) {
+          console.error('Erro ao chamar API:', error);
+          resolve({ ok: false, error: error.message || 'Erro desconhecido' });
+        }
+      });
+    },
+    
+    // Init
+    initApp: async function(userKey) {
+      return await this.call('initApp', userKey);
+    },
+    
+    // Habits
+    createHabit: async function(habitData) {
+      return await this.call('createHabit', appState.userKey, habitData);
+    },
+    
+    updateHabit: async function(habitId, updates) {
+      return await this.call('updateHabit', appState.userKey, habitId, updates);
+    },
+    
+    deleteHabit: async function(habitId) {
+      return await this.call('deleteHabit', appState.userKey, habitId);
+    },
+    
+    toggleHabitCompletion: async function(habitId, date) {
+      return await this.call('toggleHabitCompletion', appState.userKey, habitId, date);
+    },
+    
+    // Tasks
+    createTask: async function(taskData) {
+      return await this.call('createTask', appState.userKey, taskData);
+    },
+    
+    updateTask: async function(taskId, updates) {
+      return await this.call('updateTask', appState.userKey, taskId, updates);
+    },
+    
+    deleteTask: async function(taskId) {
+      return await this.call('deleteTask', appState.userKey, taskId);
+    },
+    
+    setTaskStatus: async function(taskId, status) {
+      return await this.call('setTaskStatus', appState.userKey, taskId, status);
+    },
+    
+    addChecklistItem: async function(taskId, text) {
+      return await this.call('addChecklistItem', appState.userKey, taskId, text);
+    },
+    
+    toggleChecklistItem: async function(itemId) {
+      return await this.call('toggleChecklistItem', appState.userKey, itemId);
+    },
+    
+    deleteChecklistItem: async function(itemId) {
+      return await this.call('deleteChecklistItem', appState.userKey, itemId);
+    },
+    
+    // Goals
+    createGoal: async function(goalData) {
+      return await this.call('createGoal', appState.userKey, goalData);
+    },
+    
+    updateGoal: async function(goalId, updates) {
+      return await this.call('updateGoal', appState.userKey, goalId, updates);
+    },
+    
+    deleteGoal: async function(goalId) {
+      return await this.call('deleteGoal', appState.userKey, goalId);
+    },
+    
+    addGoalProgress: async function(goalId, delta, note, date) {
+      return await this.call('addGoalProgress', appState.userKey, goalId, delta, note, date);
+    },
+    
+    // Journal
+    upsertJournalEntry: async function(date, mood, energy, note, gratitude) {
+      return await this.call('upsertJournalEntry', appState.userKey, date, mood, energy, note, gratitude);
+    },
+    
+    listJournalEntries: async function(range) {
+      return await this.call('listJournalEntries', appState.userKey, range);
+    },
+    
+    // Export
+    exportUserData: async function(format) {
+      return await this.call('exportUserData', appState.userKey, format);
+    }
+  };
+
+  // ============================================
+  // THEME MANAGEMENT
+  // ============================================
+
+  const theme = {
+    init: function() {
+      const savedTheme = storage.load('theme') || 'light';
+      this.apply(savedTheme);
+      
+      document.getElementById('theme-toggle').addEventListener('click', () => {
+        const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+        const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+        this.apply(newTheme);
+        appState.preferences.theme = newTheme;
+        storage.save('theme', newTheme);
+        storage.save('preferences', appState.preferences);
+      });
+    },
+    
+    apply: function(themeName) {
+      document.documentElement.setAttribute('data-theme', themeName);
+      appState.preferences.theme = themeName;
+    }
+  };
+
+  // ============================================
+  // ROUTER
+  // ============================================
+
+  const router = {
+    init: function() {
+      // Navigation items
+      const navItems = document.querySelectorAll('.nav-item');
+      navItems.forEach(item => {
+        item.addEventListener('click', (e) => {
+          e.preventDefault();
+          const view = item.getAttribute('data-view');
+          this.navigate(view);
+        });
+      });
+      
+      // Hash change
+      window.addEventListener('hashchange', () => {
+        const hash = window.location.hash.slice(1) || 'dashboard';
+        this.navigate(hash);
+      });
+      
+      // Initial route
+      const initialView = window.location.hash.slice(1) || 'dashboard';
+      this.navigate(initialView);
+    },
+    
+    navigate: function(view) {
+      appState.currentView = view;
+      
+      // Update active nav
+      document.querySelectorAll('.nav-item').forEach(item => {
+        item.classList.remove('active');
+        if (item.getAttribute('data-view') === view) {
+          item.classList.add('active');
+        }
+      });
+      
+      // Render view
+      this.render(view);
+      
+      // Update URL
+      window.location.hash = view;
+    },
+    
+    render: function(view) {
+      const container = document.getElementById('view-container');
+      
+      switch(view) {
+        case 'dashboard':
+          views.renderDashboard(container);
+          break;
+        case 'habits':
+          views.renderHabits(container);
+          break;
+        case 'tasks':
+          views.renderTasks(container);
+          break;
+        case 'goals':
+          views.renderGoals(container);
+          break;
+        case 'journal':
+          views.renderJournal(container);
+          break;
+        case 'settings':
+          views.renderSettings(container);
+          break;
+        default:
+          views.renderDashboard(container);
+      }
+    }
+  };
+
+  // ============================================
+  // VIEWS
+  // ============================================
+
+  const views = {
+    // Dashboard View
+    renderDashboard: function(container) {
+      const today = utils.getTodayISO();
+      
+      // KPIs
+      const activeHabits = appState.habits.filter(h => h.active);
+      const todayLogs = appState.habitLogs.filter(l => l.date === today && l.completed);
+      const completionRate = activeHabits.length > 0 ? (todayLogs.length / activeHabits.length * 100).toFixed(0) : 0;
+      
+      const openTasks = appState.tasks.filter(t => t.status === 'open').length;
+      
+      // Best streak
+      let bestStreak = 0;
+      activeHabits.forEach(habit => {
+        const streak = utils.calculateStreak(appState.habitLogs, habit.id);
+        if (streak.current > bestStreak) bestStreak = streak.current;
+      });
+      
+      // Weekly completion
+      const last7Days = [];
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date();
+        date.setDate(date.getDate() - i);
+        last7Days.push(date.toISOString().split('T')[0]);
+      }
+      
+      const weeklyData = last7Days.map(date => {
+        const dayLogs = appState.habitLogs.filter(l => l.date === date && l.completed);
+        const dayHabits = appState.habits.filter(h => h.active);
+        return dayHabits.length > 0 ? (dayLogs.length / dayHabits.length * 100) : 0;
+      });
+      
+      const weeklyAvg = (weeklyData.reduce((a, b) => a + b, 0) / 7).toFixed(0);
+      
+      // Next action
+      const nextTask = appState.tasks
+        .filter(t => t.status !== 'completed')
+        .sort((a, b) => {
+          const priorityOrder = { urgent: 0, high: 1, normal: 2, low: 3 };
+          return priorityOrder[a.priority] - priorityOrder[b.priority];
+        })[0];
+      
+      container.innerHTML = `
+        <div>
+          <h1 class="mb-lg">Dashboard</h1>
+          
+          <div class="kpi-grid">
+            <div class="kpi-card glow-blue">
+              <div class="kpi-label">Conclusões Hoje</div>
+              <div class="kpi-value">${completionRate}%</div>
+              <div class="kpi-change">${todayLogs.length} de ${activeHabits.length} rotinas</div>
+            </div>
+            
+            <div class="kpi-card glow-orange">
+              <div class="kpi-label">Tarefas Abertas</div>
+              <div class="kpi-value">${openTasks}</div>
+            </div>
+            
+            <div class="kpi-card glow-green">
+              <div class="kpi-label">Streak Atual</div>
+              <div class="kpi-value">${bestStreak}</div>
+              <div class="kpi-change">dias consecutivos</div>
+            </div>
+            
+            <div class="kpi-card glow-purple">
+              <div class="kpi-label">Média Semanal</div>
+              <div class="kpi-value">${weeklyAvg}%</div>
+              <div class="kpi-change">últimos 7 dias</div>
+            </div>
+          </div>
+          
+          <div class="grid grid-2">
+            <div class="card">
+              <div class="card-header">
+                <h2 class="card-title">Últimos 7 Dias</h2>
+              </div>
+              <canvas id="weekly-chart" width="400" height="200"></canvas>
+            </div>
+            
+            <div class="card">
+              <div class="card-header">
+                <h2 class="card-title">Próxima Ação</h2>
+              </div>
+              ${nextTask ? `
+                <div class="flex-between mb-md">
+                  <h3>${utils.sanitize(nextTask.title)}</h3>
+                  <span class="badge badge-${nextTask.priority}">${nextTask.priority}</span>
+                </div>
+                <p style="color: var(--text-secondary);">${utils.sanitize(nextTask.description || 'Sem descrição')}</p>
+                ${nextTask.dueDate ? `<p class="mt-md" style="font-size: 12px; color: var(--text-secondary);">Vence em: ${utils.formatDate(nextTask.dueDate)}</p>` : ''}
+                <button class="btn btn-primary mt-md" onclick="router.navigate('tasks')">Ver Tarefas</button>
+              ` : `
+                <div class="empty-state">
+                  <span class="material-icons empty-state-icon">check_circle</span>
+                  <p class="empty-state-title">Nenhuma tarefa pendente!</p>
+                  <p class="empty-state-description">Você está em dia com suas tarefas.</p>
+                </div>
+              `}
+            </div>
+          </div>
+        </div>
+      `;
+      
+      // Render chart
+      this.renderWeeklyChart(weeklyData, last7Days);
+    },
+    
+    renderWeeklyChart: function(data, labels) {
+      const canvas = document.getElementById('weekly-chart');
+      if (!canvas) return;
+      
+      const ctx = canvas.getContext('2d');
+      const padding = 40;
+      const chartWidth = canvas.width - padding * 2;
+      const chartHeight = canvas.height - padding * 2;
+      
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Grid
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--border-color');
+      ctx.lineWidth = 1;
+      
+      for (let i = 0; i <= 4; i++) {
+        const y = padding + (chartHeight / 4) * i;
+        ctx.beginPath();
+        ctx.moveTo(padding, y);
+        ctx.lineTo(canvas.width - padding, y);
+        ctx.stroke();
+      }
+      
+      // Line
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent-blue');
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      
+      data.forEach((value, index) => {
+        const x = padding + (chartWidth / (data.length - 1)) * index;
+        const y = padding + chartHeight - (value / 100) * chartHeight;
+        
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      
+      ctx.stroke();
+      
+      // Points
+      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent-blue');
+      data.forEach((value, index) => {
+        const x = padding + (chartWidth / (data.length - 1)) * index;
+        const y = padding + chartHeight - (value / 100) * chartHeight;
+        
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      
+      // Labels
+      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary');
+      ctx.font = '10px Inter';
+      ctx.textAlign = 'center';
+      
+      labels.forEach((label, index) => {
+        const x = padding + (chartWidth / (labels.length - 1)) * index;
+        const shortLabel = new Date(label).toLocaleDateString('pt-BR', { weekday: 'short' });
+        ctx.fillText(shortLabel, x, canvas.height - 15);
+      });
+      
+      // Y-axis labels
+      ctx.textAlign = 'right';
+      for (let i = 0; i <= 4; i++) {
+        const y = padding + (chartHeight / 4) * i;
+        const value = 100 - (i * 25);
+        ctx.fillText(value + '%', padding - 10, y + 5);
+      }
+    },
+
+    // (continua na próxima parte...)
+    // Habits View
+    renderHabits: function(container) {
+      const today = utils.getTodayISO();
+      const activeHabits = appState.habits.filter(h => h.active);
+      
+      container.innerHTML = `
+        <div>
+          <div class="flex-between mb-lg">
+            <h1>Rotinas</h1>
+            <button class="btn btn-primary" onclick="habitHandlers.openCreateModal()">
+              <span class="material-icons">add</span>
+              Nova Rotina
+            </button>
+          </div>
+          
+          ${activeHabits.length === 0 ? `
+            <div class="card">
+              <div class="empty-state">
+                <span class="material-icons empty-state-icon">check_circle</span>
+                <p class="empty-state-title">Nenhuma rotina ainda</p>
+                <p class="empty-state-description">Crie sua primeira rotina para começar a acompanhar seus hábitos.</p>
+                <button class="btn btn-primary mt-md" onclick="habitHandlers.openCreateModal()">Criar Rotina</button>
+              </div>
+            </div>
+          ` : `
+            <div class="grid">
+              ${activeHabits.map(habit => {
+                const streak = utils.calculateStreak(appState.habitLogs, habit.id);
+                const todayLog = appState.habitLogs.find(l => l.habitId === habit.id && l.date === today);
+                const isCompleted = todayLog && todayLog.completed;
+                const frequency = JSON.parse(habit.frequencyJson || '{}');
+                
+                return `
+                  <div class="card" style="border-left: 4px solid ${habit.color}">
+                    <div class="flex-between mb-md">
+                      <div class="flex gap-md">
+                        <span class="material-icons" style="color: ${habit.color}">${habit.icon}</span>
+                        <div>
+                          <h3>${utils.sanitize(habit.name)}</h3>
+                          <p style="font-size: 12px; color: var(--text-secondary);">${habit.category}</p>
+                        </div>
+                      </div>
+                      <div class="flex gap-sm">
+                        <button class="btn btn-icon btn-secondary" onclick="habitHandlers.openEditModal('${habit.id}')">
+                          <span class="material-icons">edit</span>
+                        </button>
+                        <button class="btn btn-icon btn-danger" onclick="habitHandlers.deleteHabit('${habit.id}')">
+                          <span class="material-icons">delete</span>
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div class="flex-between mb-md">
+                      <div>
+                        <p style="font-size: 12px; color: var(--text-secondary);">Streak Atual</p>
+                        <p style="font-size: 20px; font-weight: 600;">${streak.current} dias</p>
+                      </div>
+                      <div>
+                        <p style="font-size: 12px; color: var(--text-secondary);">Recorde</p>
+                        <p style="font-size: 20px; font-weight: 600;">${streak.max} dias</p>
+                      </div>
+                    </div>
+                    
+                    <button 
+                      class="btn ${isCompleted ? 'btn-success' : 'btn-secondary'} w-full" 
+                      onclick="habitHandlers.toggleCompletion('${habit.id}')"
+                      style="width: 100%"
+                    >
+                      <span class="material-icons">${isCompleted ? 'check_circle' : 'radio_button_unchecked'}</span>
+                      ${isCompleted ? 'Concluído hoje' : 'Marcar como concluído'}
+                    </button>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+        </div>
+      `;
+    },
+    
+    // Tasks View
+    renderTasks: function(container) {
+      const tasks = appState.tasks;
+      const filters = {
+        status: 'all',
+        priority: 'all',
+        search: ''
+      };
+      
+      const filteredTasks = tasks.filter(task => {
+        if (filters.status !== 'all' && task.status !== filters.status) return false;
+        if (filters.priority !== 'all' && task.priority !== filters.priority) return false;
+        if (filters.search && !task.title.toLowerCase().includes(filters.search.toLowerCase())) return false;
+        return true;
+      });
+      
+      const statusCounts = {
+        open: tasks.filter(t => t.status === 'open').length,
+        'in-progress': tasks.filter(t => t.status === 'in-progress').length,
+        completed: tasks.filter(t => t.status === 'completed').length
+      };
+      
+      container.innerHTML = `
+        <div>
+          <div class="flex-between mb-lg">
+            <h1>Tarefas</h1>
+            <button class="btn btn-primary" onclick="taskHandlers.openCreateModal()">
+              <span class="material-icons">add</span>
+              Nova Tarefa
+            </button>
+          </div>
+          
+          <div class="card mb-lg">
+            <div class="flex gap-md flex-wrap">
+              <div>
+                <label class="form-label">Buscar</label>
+                <input type="text" class="form-input" id="task-search" placeholder="Buscar tarefas..." style="max-width: 300px">
+              </div>
+              <div>
+                <label class="form-label">Status</label>
+                <select class="form-select" id="task-status-filter" style="max-width: 200px">
+                  <option value="all">Todos</option>
+                  <option value="open">Aberto (${statusCounts.open})</option>
+                  <option value="in-progress">Em andamento (${statusCounts['in-progress']})</option>
+                  <option value="completed">Concluído (${statusCounts.completed})</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label">Prioridade</label>
+                <select class="form-select" id="task-priority-filter" style="max-width: 200px">
+                  <option value="all">Todas</option>
+                  <option value="urgent">Urgente</option>
+                  <option value="high">Alta</option>
+                  <option value="normal">Normal</option>
+                  <option value="low">Baixa</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          
+          <div id="tasks-list">
+            ${filteredTasks.length === 0 ? `
+              <div class="card">
+                <div class="empty-state">
+                  <span class="material-icons empty-state-icon">task_alt</span>
+                  <p class="empty-state-title">Nenhuma tarefa encontrada</p>
+                  <p class="empty-state-description">Crie uma nova tarefa ou ajuste os filtros.</p>
+                </div>
+              </div>
+            ` : `
+              ${filteredTasks.map(task => {
+                const checklists = appState.taskChecklists.filter(c => c.taskId === task.id);
+                const completedItems = checklists.filter(c => c.done).length;
+                const tags = JSON.parse(task.tagsJson || '[]');
+                
+                return `
+                  <div class="card mb-md">
+                    <div class="flex-between mb-md">
+                      <div class="flex gap-md" style="flex: 1">
+                        <input 
+                          type="checkbox" 
+                          class="form-checkbox"
+                          ${task.status === 'completed' ? 'checked' : ''}
+                          onclick="taskHandlers.toggleStatus('${task.id}')"
+                        >
+                        <div style="flex: 1">
+                          <div class="flex gap-sm flex-wrap mb-sm">
+                            <h3>${utils.sanitize(task.title)}</h3>
+                            <span class="badge badge-${task.priority}">${task.priority}</span>
+                          </div>
+                          ${task.description ? `<p style="color: var(--text-secondary); font-size: 14px">${utils.sanitize(task.description)}</p>` : ''}
+                          <div class="flex gap-sm flex-wrap mt-sm">
+                            ${tags.map(tag => `<span class="badge badge-normal">${utils.sanitize(tag)}</span>`).join('')}
+                          </div>
+                        </div>
+                      </div>
+                      <div class="flex gap-sm">
+                        <button class="btn btn-icon btn-secondary" onclick="taskHandlers.openEditModal('${task.id}')">
+                          <span class="material-icons">edit</span>
+                        </button>
+                        <button class="btn btn-icon btn-danger" onclick="taskHandlers.deleteTask('${task.id}')">
+                          <span class="material-icons">delete</span>
+                        </button>
+                      </div>
+                    </div>
+                    
+                    ${checklists.length > 0 ? `
+                      <div class="mt-md" style="padding-left: 42px">
+                        <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px">
+                          Checklist: ${completedItems}/${checklists.length} concluídos
+                        </p>
+                        <div class="progress-bar">
+                          <div class="progress-fill ${completedItems === checklists.length ? 'success' : ''}" style="width: ${checklists.length > 0 ? (completedItems / checklists.length * 100) : 0}%"></div>
+                        </div>
+                      </div>
+                    ` : ''}
+                    
+                    ${task.dueDate ? `
+                      <p style="font-size: 12px; color: var(--text-secondary); margin-top: 12px">
+                        <span class="material-icons" style="font-size: 14px; vertical-align: middle">event</span>
+                        Vence em: ${utils.formatDate(task.dueDate)}
+                      </p>
+                    ` : ''}
+                  </div>
+                `;
+              }).join('')}
+            `}
+          </div>
+        </div>
+      `;
+      
+      // Attach filter handlers
+      const searchInput = document.getElementById('task-search');
+      const statusFilter = document.getElementById('task-status-filter');
+      const priorityFilter = document.getElementById('task-priority-filter');
+      
+      const updateFilters = utils.debounce(() => {
+        filters.search = searchInput.value;
+        filters.status = statusFilter.value;
+        filters.priority = priorityFilter.value;
+        this.renderTasks(container);
+      }, 300);
+      
+      searchInput.addEventListener('input', updateFilters);
+      statusFilter.addEventListener('change', updateFilters);
+      priorityFilter.addEventListener('change', updateFilters);
+    },
+    
+    // Goals View
+    renderGoals: function(container) {
+      const goals = appState.goals.filter(g => g.status !== 'archived');
+      
+      container.innerHTML = `
+        <div>
+          <div class="flex-between mb-lg">
+            <h1>Metas</h1>
+            <button class="btn btn-primary" onclick="goalHandlers.openCreateModal()">
+              <span class="material-icons">add</span>
+              Nova Meta
+            </button>
+          </div>
+          
+          ${goals.length === 0 ? `
+            <div class="card">
+              <div class="empty-state">
+                <span class="material-icons empty-state-icon">flag</span>
+                <p class="empty-state-title">Nenhuma meta ainda</p>
+                <p class="empty-state-description">Defina suas metas e acompanhe seu progresso.</p>
+                <button class="btn btn-primary mt-md" onclick="goalHandlers.openCreateModal()">Criar Meta</button>
+              </div>
+            </div>
+          ` : `
+            <div class="grid">
+              ${goals.map(goal => {
+                const progress = goal.targetValue > 0 ? (goal.currentValue / goal.targetValue * 100) : 0;
+                const logs = appState.goalLogs.filter(l => l.goalId === goal.id).slice(-5);
+                
+                return `
+                  <div class="card ${progress >= 100 ? 'glow-green' : 'glow-blue'}">
+                    <div class="flex-between mb-md">
+                      <h3>${utils.sanitize(goal.title)}</h3>
+                      <div class="flex gap-sm">
+                        <button class="btn btn-icon btn-secondary" onclick="goalHandlers.openEditModal('${goal.id}')">
+                          <span class="material-icons">edit</span>
+                        </button>
+                        <button class="btn btn-icon btn-danger" onclick="goalHandlers.deleteGoal('${goal.id}')">
+                          <span class="material-icons">delete</span>
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div class="mb-md">
+                      <div class="flex-between mb-sm">
+                        <span style="font-size: 14px; color: var(--text-secondary)">${goal.metric}</span>
+                        <span style="font-size: 14px; font-weight: 600">${goal.currentValue} / ${goal.targetValue}</span>
+                      </div>
+                      <div class="progress-bar">
+                        <div class="progress-fill ${progress >= 100 ? 'success' : ''}" style="width: ${Math.min(progress, 100)}%"></div>
+                      </div>
+                      <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px">${progress.toFixed(1)}% concluído</p>
+                    </div>
+                    
+                    ${goal.dueDate ? `
+                      <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px">
+                        <span class="material-icons" style="font-size: 14px; vertical-align: middle">event</span>
+                        Prazo: ${utils.formatDate(goal.dueDate)}
+                      </p>
+                    ` : ''}
+                    
+                    <button class="btn btn-primary w-full" onclick="goalHandlers.openProgressModal('${goal.id}')" style="width: 100%">
+                      <span class="material-icons">add</span>
+                      Adicionar Progresso
+                    </button>
+                    
+                    ${logs.length > 0 ? `
+                      <div class="mt-md" style="border-top: 1px solid var(--border-color); padding-top: 12px">
+                        <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px">Últimas atualizações:</p>
+                        ${logs.reverse().map(log => `
+                          <div style="font-size: 12px; margin-bottom: 4px">
+                            <span style="color: var(--accent-green)">+${log.deltaValue}</span>
+                            ${log.note ? `<span style="color: var(--text-secondary)"> - ${utils.sanitize(log.note)}</span>` : ''}
+                            <span style="color: var(--text-tertiary); margin-left: 8px">${utils.formatDate(log.date)}</span>
+                          </div>
+                        `).join('')}
+                      </div>
+                    ` : ''}
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+        </div>
+      `;
+    },
+    // Journal View
+    renderJournal: function(container) {
+      const journals = appState.journals.sort((a, b) => b.date.localeCompare(a.date));
+      const today = utils.getTodayISO();
+      const todayEntry = journals.find(j => j.date === today);
+      
+      container.innerHTML = `
+        <div>
+          <div class="flex-between mb-lg">
+            <h1>Diário</h1>
+          </div>
+          
+          <div class="grid grid-2">
+            <div class="card">
+              <h2 class="card-title mb-md">Entrada de Hoje</h2>
+              
+              <form id="journal-form" onsubmit="return false;">
+                <div class="form-group">
+                  <label class="form-label">Como você está se sentindo? (1-5)</label>
+                  <div class="flex gap-sm">
+                    ${[1,2,3,4,5].map(val => `
+                      <button 
+                        type="button" 
+                        class="btn ${todayEntry && todayEntry.mood == val ? 'btn-primary' : 'btn-secondary'}" 
+                        onclick="document.getElementById('mood-input').value = ${val}; this.parentElement.querySelectorAll('.btn').forEach(b => b.classList.remove('btn-primary')); this.classList.add('btn-primary');"
+                        style="width: 40px; height: 40px; padding: 0"
+                      >${val}</button>
+                    `).join('')}
+                  </div>
+                  <input type="hidden" id="mood-input" value="${todayEntry ? todayEntry.mood : 3}">
+                </div>
+                
+                <div class="form-group">
+                  <label class="form-label">Nível de energia (1-5)</label>
+                  <div class="flex gap-sm">
+                    ${[1,2,3,4,5].map(val => `
+                      <button 
+                        type="button" 
+                        class="btn ${todayEntry && todayEntry.energy == val ? 'btn-primary' : 'btn-secondary'}" 
+                        onclick="document.getElementById('energy-input').value = ${val}; this.parentElement.querySelectorAll('.btn').forEach(b => b.classList.remove('btn-primary')); this.classList.add('btn-primary');"
+                        style="width: 40px; height: 40px; padding: 0"
+                      >${val}</button>
+                    `).join('')}
+                  </div>
+                  <input type="hidden" id="energy-input" value="${todayEntry ? todayEntry.energy : 3}">
+                </div>
+                
+                <div class="form-group">
+                  <label class="form-label">Notas do dia</label>
+                  <textarea 
+                    class="form-textarea" 
+                    id="note-input" 
+                    placeholder="Como foi seu dia?"
+                  >${todayEntry ? utils.sanitize(todayEntry.note) : ''}</textarea>
+                </div>
+                
+                <div class="form-group">
+                  <label class="form-label">Gratidão</label>
+                  <textarea 
+                    class="form-textarea" 
+                    id="gratitude-input" 
+                    placeholder="Pelo que você é grato hoje?"
+                    style="min-height: 80px"
+                  >${todayEntry ? utils.sanitize(todayEntry.gratitude) : ''}</textarea>
+                </div>
+                
+                <button type="button" class="btn btn-primary w-full" onclick="journalHandlers.saveEntry()" style="width: 100%">
+                  <span class="material-icons">save</span>
+                  Salvar Entrada
+                </button>
+              </form>
+            </div>
+            
+            <div class="card" style="max-height: 600px; overflow-y: auto">
+              <h2 class="card-title mb-md">Entradas Anteriores</h2>
+              
+              ${journals.length === 0 ? `
+                <div class="empty-state">
+                  <span class="material-icons empty-state-icon">book</span>
+                  <p class="empty-state-description">Nenhuma entrada ainda</p>
+                </div>
+              ` : `
+                ${journals.map(entry => `
+                  <div class="mb-md" style="padding-bottom: 12px; border-bottom: 1px solid var(--border-color)">
+                    <div class="flex-between mb-sm">
+                      <strong>${utils.formatDate(entry.date)}</strong>
+                      <div class="flex gap-sm">
+                        <span style="font-size: 12px; color: var(--text-secondary)">😊 ${entry.mood}/5</span>
+                        <span style="font-size: 12px; color: var(--text-secondary)">⚡ ${entry.energy}/5</span>
+                      </div>
+                    </div>
+                    ${entry.note ? `<p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px">${utils.sanitize(entry.note)}</p>` : ''}
+                    ${entry.gratitude ? `<p style="font-size: 12px; color: var(--accent-green)"><em>"${utils.sanitize(entry.gratitude)}"</em></p>` : ''}
+                  </div>
+                `).join('')}
+              `}
+            </div>
+          </div>
+        </div>
+      `;
+    },
+    
+    // Settings View
+    renderSettings: function(container) {
+      container.innerHTML = `
+        <div>
+          <h1 class="mb-lg">Configurações</h1>
+          
+          <div class="grid">
+            <div class="card">
+              <h2 class="card-title mb-md">Preferências</h2>
+              
+              <div class="form-group">
+                <label class="form-label">Tema</label>
+                <select class="form-select" id="theme-select">
+                  <option value="light" ${appState.preferences.theme === 'light' ? 'selected' : ''}>Claro</option>
+                  <option value="dark" ${appState.preferences.theme === 'dark' ? 'selected' : ''}>Escuro</option>
+                </select>
+              </div>
+              
+              <div class="form-group">
+                <label class="form-label">Início da semana</label>
+                <select class="form-select" id="week-start-select">
+                  <option value="sunday" ${appState.preferences.weekStart === 'sunday' ? 'selected' : ''}>Domingo</option>
+                  <option value="monday" ${appState.preferences.weekStart === 'monday' ? 'selected' : ''}>Segunda-feira</option>
+                </select>
+              </div>
+              
+              <div class="form-group">
+                <label class="form-label">Formato de hora</label>
+                <select class="form-select" id="time-format-select">
+                  <option value="12h" ${appState.preferences.timeFormat === '12h' ? 'selected' : ''}>12 horas (AM/PM)</option>
+                  <option value="24h" ${appState.preferences.timeFormat === '24h' ? 'selected' : ''}>24 horas</option>
+                </select>
+              </div>
+              
+              <div class="form-group">
+                <label class="flex gap-md">
+                  <input 
+                    type="checkbox" 
+                    class="form-checkbox" 
+                    id="reduce-animations"
+                    ${appState.preferences.reduceAnimations ? 'checked' : ''}
+                  >
+                  <span>Reduzir animações</span>
+                </label>
+              </div>
+              
+              <button class="btn btn-primary" onclick="settingsHandlers.savePreferences()">
+                <span class="material-icons">save</span>
+                Salvar Preferências
+              </button>
+            </div>
+            
+            <div class="card">
+              <h2 class="card-title mb-md">Backup & Export</h2>
+              
+              <p style="color: var(--text-secondary); margin-bottom: 16px">
+                Exporte seus dados para backup ou migração.
+              </p>
+              
+              <div class="flex gap-md flex-wrap">
+                <button class="btn btn-secondary" onclick="settingsHandlers.exportData('json')">
+                  <span class="material-icons">download</span>
+                  Exportar JSON
+                </button>
+                <button class="btn btn-secondary" onclick="settingsHandlers.exportData('csv')">
+                  <span class="material-icons">download</span>
+                  Exportar CSV
+                </button>
+              </div>
+            </div>
+            
+            <div class="card">
+              <h2 class="card-title mb-md">Informações</h2>
+              
+              <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px">
+                <strong>Usuário:</strong> ${appState.userKey}
+              </p>
+              <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px">
+                <strong>Rotinas ativas:</strong> ${appState.habits.filter(h => h.active).length}
+              </p>
+              <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px">
+                <strong>Tarefas:</strong> ${appState.tasks.length}
+              </p>
+              <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px">
+                <strong>Metas:</strong> ${appState.goals.length}
+              </p>
+              <p style="font-size: 14px; color: var(--text-secondary)">
+                <strong>Entradas no diário:</strong> ${appState.journals.length}
+              </p>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+  };
+
+  // ============================================
+  // HABIT HANDLERS
+  // ============================================
+
+  const habitHandlers = {
+    openCreateModal: function() {
+      const content = `
+        <form id="habit-form">
+          <div class="form-group">
+            <label class="form-label">Nome da rotina *</label>
+            <input type="text" class="form-input" id="habit-name" required>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Categoria</label>
+            <select class="form-select" id="habit-category">
+              <option value="health">Saúde</option>
+              <option value="productivity">Produtividade</option>
+              <option value="learning">Aprendizado</option>
+              <option value="fitness">Fitness</option>
+              <option value="mindfulness">Mindfulness</option>
+              <option value="other">Outro</option>
+            </select>
+          </div>
+          
+          <div class="grid grid-2">
+            <div class="form-group">
+              <label class="form-label">Cor</label>
+              <input type="color" class="form-input" id="habit-color" value="#4285f4">
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">Ícone (Material Icon)</label>
+              <input type="text" class="form-input" id="habit-icon" value="check_circle" placeholder="check_circle">
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Frequência</label>
+            <select class="form-select" id="habit-frequency">
+              <option value="daily">Diária</option>
+              <option value="weekdays">Dias úteis (seg-sex)</option>
+              <option value="weekends">Fins de semana</option>
+              <option value="custom">Personalizada</option>
+            </select>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Meta por dia</label>
+            <input type="number" class="form-input" id="habit-goal" value="1" min="1">
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Lembrete (opcional)</label>
+            <input type="time" class="form-input" id="habit-reminder">
+          </div>
+        </form>
+      `;
+      
+      modal.open('Nova Rotina', content, [
+        { label: 'Cancelar', onclick: 'modal.close()' },
+        { label: 'Criar', primary: true, onclick: 'habitHandlers.createHabit()' }
+      ]);
+    },
+    
+    createHabit: async function() {
+      const name = document.getElementById('habit-name').value;
+      const category = document.getElementById('habit-category').value;
+      const color = document.getElementById('habit-color').value;
+      const icon = document.getElementById('habit-icon').value;
+      const frequencyType = document.getElementById('habit-frequency').value;
+      const goalPerDay = parseInt(document.getElementById('habit-goal').value);
+      const reminderTime = document.getElementById('habit-reminder').value;
+      
+      if (!name) {
+        toast.error('Por favor, preencha o nome da rotina');
+        return;
+      }
+      
+      try {
+        const result = await api.createHabit({
+          name,
+          category,
+          color,
+          icon,
+          frequency: { type: frequencyType },
+          goalPerDay,
+          reminderTime,
+          active: true
+        });
+        
+        if (result.ok) {
+          appState.habits.push(result.data);
+          storage.save('appCache', appState);
+          modal.close();
+          toast.success('Rotina criada com sucesso!');
+          router.render('habits');
+        } else {
+          toast.error(result.error || 'Erro ao criar rotina');
+        }
+      } catch (error) {
+        toast.error('Erro ao criar rotina');
+        console.error(error);
+      }
+    },
+    
+    openEditModal: function(habitId) {
+      const habit = appState.habits.find(h => h.id === habitId);
+      if (!habit) return;
+      
+      const frequency = JSON.parse(habit.frequencyJson || '{}');
+      
+      const content = `
+        <form id="habit-form">
+          <div class="form-group">
+            <label class="form-label">Nome da rotina *</label>
+            <input type="text" class="form-input" id="habit-name" value="${utils.sanitize(habit.name)}" required>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Categoria</label>
+            <select class="form-select" id="habit-category">
+              <option value="health" ${habit.category === 'health' ? 'selected' : ''}>Saúde</option>
+              <option value="productivity" ${habit.category === 'productivity' ? 'selected' : ''}>Produtividade</option>
+              <option value="learning" ${habit.category === 'learning' ? 'selected' : ''}>Aprendizado</option>
+              <option value="fitness" ${habit.category === 'fitness' ? 'selected' : ''}>Fitness</option>
+              <option value="mindfulness" ${habit.category === 'mindfulness' ? 'selected' : ''}>Mindfulness</option>
+              <option value="other" ${habit.category === 'other' ? 'selected' : ''}>Outro</option>
+            </select>
+          </div>
+          
+          <div class="grid grid-2">
+            <div class="form-group">
+              <label class="form-label">Cor</label>
+              <input type="color" class="form-input" id="habit-color" value="${habit.color}">
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">Ícone</label>
+              <input type="text" class="form-input" id="habit-icon" value="${habit.icon}">
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label class="flex gap-md">
+              <input type="checkbox" class="form-checkbox" id="habit-active" ${habit.active ? 'checked' : ''}>
+              <span>Rotina ativa</span>
+            </label>
+          </div>
+        </form>
+      `;
+      
+      modal.open('Editar Rotina', content, [
+        { label: 'Cancelar', onclick: 'modal.close()' },
+        { label: 'Salvar', primary: true, onclick: `habitHandlers.updateHabit('${habitId}')` }
+      ]);
+    },
+    
+    updateHabit: async function(habitId) {
+      const name = document.getElementById('habit-name').value;
+      const category = document.getElementById('habit-category').value;
+      const color = document.getElementById('habit-color').value;
+      const icon = document.getElementById('habit-icon').value;
+      const active = document.getElementById('habit-active').checked;
+      
+      if (!name) {
+        toast.error('Por favor, preencha o nome da rotina');
+        return;
+      }
+      
+      try {
+        const result = await api.updateHabit(habitId, { name, category, color, icon, active });
+        
+        if (result.ok) {
+          const index = appState.habits.findIndex(h => h.id === habitId);
+          if (index !== -1) {
+            Object.assign(appState.habits[index], result.data);
+          }
+          storage.save('appCache', appState);
+          modal.close();
+          toast.success('Rotina atualizada!');
+          router.render('habits');
+        } else {
+          toast.error(result.error || 'Erro ao atualizar rotina');
+        }
+      } catch (error) {
+        toast.error('Erro ao atualizar rotina');
+        console.error(error);
+      }
+    },
+    
+    deleteHabit: async function(habitId) {
+      if (!confirm('Tem certeza que deseja excluir esta rotina? Esta ação não pode ser desfeita.')) {
+        return;
+      }
+      
+      try {
+        const result = await api.deleteHabit(habitId);
+        
+        if (result.ok) {
+          appState.habits = appState.habits.filter(h => h.id !== habitId);
+          appState.habitLogs = appState.habitLogs.filter(l => l.habitId !== habitId);
+          storage.save('appCache', appState);
+          toast.success('Rotina excluída!');
+          router.render('habits');
+        } else {
+          toast.error(result.error || 'Erro ao excluir rotina');
+        }
+      } catch (error) {
+        toast.error('Erro ao excluir rotina');
+        console.error(error);
+      }
+    },
+    
+    toggleCompletion: async function(habitId) {
+      const today = utils.getTodayISO();
+      
+      try {
+        const result = await api.toggleHabitCompletion(habitId, today);
+        
+        if (result.ok) {
+          const existingLog = appState.habitLogs.find(l => l.habitId === habitId && l.date === today);
+          if (existingLog) {
+            existingLog.completed = result.data.completed;
+          } else {
+            appState.habitLogs.push(result.data);
+          }
+          storage.save('appCache', appState);
+          toast.success(result.data.completed ? 'Rotina concluída!' : 'Marcação removida');
+          router.render('habits');
+        } else {
+          toast.error(result.error || 'Erro ao atualizar rotina');
+        }
+      } catch (error) {
+        toast.error('Erro ao atualizar rotina');
+        console.error(error);
+      }
+    }
+  };
+
+  window.habitHandlers = habitHandlers;
+
+  // ============================================
+  // TASK HANDLERS
+  // ============================================
+
+  const taskHandlers = {
+    openCreateModal: function() {
+      const content = `
+        <form id="task-form">
+          <div class="form-group">
+            <label class="form-label">Título *</label>
+            <input type="text" class="form-input" id="task-title" required>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Descrição</label>
+            <textarea class="form-textarea" id="task-description"></textarea>
+          </div>
+          
+          <div class="grid grid-2">
+            <div class="form-group">
+              <label class="form-label">Prioridade</label>
+              <select class="form-select" id="task-priority">
+                <option value="low">Baixa</option>
+                <option value="normal" selected>Normal</option>
+                <option value="high">Alta</option>
+                <option value="urgent">Urgente</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">Data limite</label>
+              <input type="date" class="form-input" id="task-duedate">
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Tags (separadas por vírgula)</label>
+            <input type="text" class="form-input" id="task-tags" placeholder="trabalho, pessoal">
+          </div>
+        </form>
+      `;
+      
+      modal.open('Nova Tarefa', content, [
+        { label: 'Cancelar', onclick: 'modal.close()' },
+        { label: 'Criar', primary: true, onclick: 'taskHandlers.createTask()' }
+      ]);
+    },
+    
+    createTask: async function() {
+      const title = document.getElementById('task-title').value;
+      const description = document.getElementById('task-description').value;
+      const priority = document.getElementById('task-priority').value;
+      const dueDate = document.getElementById('task-duedate').value;
+      const tagsStr = document.getElementById('task-tags').value;
+      const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+      
+      if (!title) {
+        toast.error('Por favor, preencha o título');
+        return;
+      }
+      
+      try {
+        const result = await api.createTask({ title, description, priority, dueDate, tags, status: 'open' });
+        
+        if (result.ok) {
+          appState.tasks.push(result.data);
+          storage.save('appCache', appState);
+          modal.close();
+          toast.success('Tarefa criada!');
+          router.render('tasks');
+        } else {
+          toast.error(result.error || 'Erro ao criar tarefa');
+        }
+      } catch (error) {
+        toast.error('Erro ao criar tarefa');
+        console.error(error);
+      }
+    },
+    
+    openEditModal: function(taskId) {
+      const task = appState.tasks.find(t => t.id === taskId);
+      if (!task) return;
+      
+      const tags = JSON.parse(task.tagsJson || '[]');
+      
+      const content = `
+        <form id="task-form">
+          <div class="form-group">
+            <label class="form-label">Título *</label>
+            <input type="text" class="form-input" id="task-title" value="${utils.sanitize(task.title)}" required>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Descrição</label>
+            <textarea class="form-textarea" id="task-description">${utils.sanitize(task.description || '')}</textarea>
+          </div>
+          
+          <div class="grid grid-2">
+            <div class="form-group">
+              <label class="form-label">Prioridade</label>
+              <select class="form-select" id="task-priority">
+                <option value="low" ${task.priority === 'low' ? 'selected' : ''}>Baixa</option>
+                <option value="normal" ${task.priority === 'normal' ? 'selected' : ''}>Normal</option>
+                <option value="high" ${task.priority === 'high' ? 'selected' : ''}>Alta</option>
+                <option value="urgent" ${task.priority === 'urgent' ? 'selected' : ''}>Urgente</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">Status</label>
+              <select class="form-select" id="task-status">
+                <option value="open" ${task.status === 'open' ? 'selected' : ''}>Aberto</option>
+                <option value="in-progress" ${task.status === 'in-progress' ? 'selected' : ''}>Em andamento</option>
+                <option value="completed" ${task.status === 'completed' ? 'selected' : ''}>Concluído</option>
+              </select>
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Data limite</label>
+            <input type="date" class="form-input" id="task-duedate" value="${task.dueDate || ''}">
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Tags (separadas por vírgula)</label>
+            <input type="text" class="form-input" id="task-tags" value="${tags.join(', ')}">
+          </div>
+        </form>
+      `;
+      
+      modal.open('Editar Tarefa', content, [
+        { label: 'Cancelar', onclick: 'modal.close()' },
+        { label: 'Salvar', primary: true, onclick: `taskHandlers.updateTask('${taskId}')` }
+      ]);
+    },
+    
+    updateTask: async function(taskId) {
+      const title = document.getElementById('task-title').value;
+      const description = document.getElementById('task-description').value;
+      const priority = document.getElementById('task-priority').value;
+      const status = document.getElementById('task-status').value;
+      const dueDate = document.getElementById('task-duedate').value;
+      const tagsStr = document.getElementById('task-tags').value;
+      const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(Boolean) : [];
+      
+      if (!title) {
+        toast.error('Por favor, preencha o título');
+        return;
+      }
+      
+      try {
+        const result = await api.updateTask(taskId, { title, description, priority, status, dueDate, tags });
+        
+        if (result.ok) {
+          const index = appState.tasks.findIndex(t => t.id === taskId);
+          if (index !== -1) {
+            Object.assign(appState.tasks[index], result.data);
+          }
+          storage.save('appCache', appState);
+          modal.close();
+          toast.success('Tarefa atualizada!');
+          router.render('tasks');
+        } else {
+          toast.error(result.error || 'Erro ao atualizar tarefa');
+        }
+      } catch (error) {
+        toast.error('Erro ao atualizar tarefa');
+        console.error(error);
+      }
+    },
+    
+    deleteTask: async function(taskId) {
+      if (!confirm('Tem certeza que deseja excluir esta tarefa?')) {
+        return;
+      }
+      
+      try {
+        const result = await api.deleteTask(taskId);
+        
+        if (result.ok) {
+          appState.tasks = appState.tasks.filter(t => t.id !== taskId);
+          appState.taskChecklists = appState.taskChecklists.filter(c => c.taskId !== taskId);
+          storage.save('appCache', appState);
+          toast.success('Tarefa excluída!');
+          router.render('tasks');
+        } else {
+          toast.error(result.error || 'Erro ao excluir tarefa');
+        }
+      } catch (error) {
+        toast.error('Erro ao excluir tarefa');
+        console.error(error);
+      }
+    },
+    
+    toggleStatus: async function(taskId) {
+      const task = appState.tasks.find(t => t.id === taskId);
+      if (!task) return;
+      
+      const newStatus = task.status === 'completed' ? 'open' : 'completed';
+      
+      try {
+        const result = await api.setTaskStatus(taskId, newStatus);
+        
+        if (result.ok) {
+          task.status = newStatus;
+          storage.save('appCache', appState);
+          router.render('tasks');
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+  };
+
+  window.taskHandlers = taskHandlers;
+
+  // ============================================
+  // GOAL HANDLERS
+  // ============================================
+
+  const goalHandlers = {
+    openCreateModal: function() {
+      const content = `
+        <form id="goal-form">
+          <div class="form-group">
+            <label class="form-label">Título *</label>
+            <input type="text" class="form-input" id="goal-title" required>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Métrica *</label>
+            <input type="text" class="form-input" id="goal-metric" placeholder="Ex: páginas, km, horas" required>
+          </div>
+          
+          <div class="grid grid-2">
+            <div class="form-group">
+              <label class="form-label">Valor alvo *</label>
+              <input type="number" class="form-input" id="goal-target" min="0" step="0.01" required>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">Valor atual</label>
+              <input type="number" class="form-input" id="goal-current" value="0" min="0" step="0.01">
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Data limite</label>
+            <input type="date" class="form-input" id="goal-duedate">
+          </div>
+        </form>
+      `;
+      
+      modal.open('Nova Meta', content, [
+        { label: 'Cancelar', onclick: 'modal.close()' },
+        { label: 'Criar', primary: true, onclick: 'goalHandlers.createGoal()' }
+      ]);
+    },
+    
+    createGoal: async function() {
+      const title = document.getElementById('goal-title').value;
+      const metric = document.getElementById('goal-metric').value;
+      const targetValue = parseFloat(document.getElementById('goal-target').value);
+      const currentValue = parseFloat(document.getElementById('goal-current').value);
+      const dueDate = document.getElementById('goal-duedate').value;
+      
+      if (!title || !metric || !targetValue) {
+        toast.error('Por favor, preencha todos os campos obrigatórios');
+        return;
+      }
+      
+      try {
+        const result = await api.createGoal({ title, metric, targetValue, currentValue, dueDate, status: 'active' });
+        
+        if (result.ok) {
+          appState.goals.push(result.data);
+          storage.save('appCache', appState);
+          modal.close();
+          toast.success('Meta criada!');
+          router.render('goals');
+        } else {
+          toast.error(result.error || 'Erro ao criar meta');
+        }
+      } catch (error) {
+        toast.error('Erro ao criar meta');
+        console.error(error);
+      }
+    },
+    
+    openEditModal: function(goalId) {
+      const goal = appState.goals.find(g => g.id === goalId);
+      if (!goal) return;
+      
+      const content = `
+        <form id="goal-form">
+          <div class="form-group">
+            <label class="form-label">Título *</label>
+            <input type="text" class="form-input" id="goal-title" value="${utils.sanitize(goal.title)}" required>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Métrica *</label>
+            <input type="text" class="form-input" id="goal-metric" value="${utils.sanitize(goal.metric)}" required>
+          </div>
+          
+          <div class="grid grid-2">
+            <div class="form-group">
+              <label class="form-label">Valor alvo *</label>
+              <input type="number" class="form-input" id="goal-target" value="${goal.targetValue}" min="0" step="0.01" required>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">Valor atual</label>
+              <input type="number" class="form-input" id="goal-current" value="${goal.currentValue}" min="0" step="0.01">
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Data limite</label>
+            <input type="date" class="form-input" id="goal-duedate" value="${goal.dueDate || ''}">
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Status</label>
+            <select class="form-select" id="goal-status">
+              <option value="active" ${goal.status === 'active' ? 'selected' : ''}>Ativa</option>
+              <option value="completed" ${goal.status === 'completed' ? 'selected' : ''}>Concluída</option>
+              <option value="archived" ${goal.status === 'archived' ? 'selected' : ''}>Arquivada</option>
+            </select>
+          </div>
+        </form>
+      `;
+      
+      modal.open('Editar Meta', content, [
+        { label: 'Cancelar', onclick: 'modal.close()' },
+        { label: 'Salvar', primary: true, onclick: `goalHandlers.updateGoal('${goalId}')` }
+      ]);
+    },
+    
+    updateGoal: async function(goalId) {
+      const title = document.getElementById('goal-title').value;
+      const metric = document.getElementById('goal-metric').value;
+      const targetValue = parseFloat(document.getElementById('goal-target').value);
+      const currentValue = parseFloat(document.getElementById('goal-current').value);
+      const dueDate = document.getElementById('goal-duedate').value;
+      const status = document.getElementById('goal-status').value;
+      
+      if (!title || !metric || !targetValue) {
+        toast.error('Por favor, preencha todos os campos obrigatórios');
+        return;
+      }
+      
+      try {
+        const result = await api.updateGoal(goalId, { title, metric, targetValue, currentValue, dueDate, status });
+        
+        if (result.ok) {
+          const index = appState.goals.findIndex(g => g.id === goalId);
+          if (index !== -1) {
+            Object.assign(appState.goals[index], result.data);
+          }
+          storage.save('appCache', appState);
+          modal.close();
+          toast.success('Meta atualizada!');
+          router.render('goals');
+        } else {
+          toast.error(result.error || 'Erro ao atualizar meta');
+        }
+      } catch (error) {
+        toast.error('Erro ao atualizar meta');
+        console.error(error);
+      }
+    },
+    
+    deleteGoal: async function(goalId) {
+      if (!confirm('Tem certeza que deseja excluir esta meta?')) {
+        return;
+      }
+      
+      try {
+        const result = await api.deleteGoal(goalId);
+        
+        if (result.ok) {
+          appState.goals = appState.goals.filter(g => g.id !== goalId);
+          appState.goalLogs = appState.goalLogs.filter(l => l.goalId !== goalId);
+          storage.save('appCache', appState);
+          toast.success('Meta excluída!');
+          router.render('goals');
+        } else {
+          toast.error(result.error || 'Erro ao excluir meta');
+        }
+      } catch (error) {
+        toast.error('Erro ao excluir meta');
+        console.error(error);
+      }
+    },
+    
+    openProgressModal: function(goalId) {
+      const goal = appState.goals.find(g => g.id === goalId);
+      if (!goal) return;
+      
+      const content = `
+        <form id="progress-form">
+          <p class="mb-md" style="color: var(--text-secondary)">
+            Progresso atual: <strong>${goal.currentValue} / ${goal.targetValue} ${goal.metric}</strong>
+          </p>
+          
+          <div class="form-group">
+            <label class="form-label">Valor a adicionar *</label>
+            <input type="number" class="form-input" id="progress-delta" min="0" step="0.01" required>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Nota (opcional)</label>
+            <textarea class="form-textarea" id="progress-note" style="min-height: 80px"></textarea>
+          </div>
+          
+          <div class="form-group">
+            <label class="form-label">Data</label>
+            <input type="date" class="form-input" id="progress-date" value="${utils.getTodayISO()}">
+          </div>
+        </form>
+      `;
+      
+      modal.open('Adicionar Progresso', content, [
+        { label: 'Cancelar', onclick: 'modal.close()' },
+        { label: 'Adicionar', primary: true, onclick: `goalHandlers.addProgress('${goalId}')` }
+      ]);
+    },
+    
+    addProgress: async function(goalId) {
+      const delta = parseFloat(document.getElementById('progress-delta').value);
+      const note = document.getElementById('progress-note').value;
+      const date = document.getElementById('progress-date').value;
+      
+      if (!delta || delta <= 0) {
+        toast.error('Por favor, insira um valor válido');
+        return;
+      }
+      
+      try {
+        const result = await api.addGoalProgress(goalId, delta, note, date);
+        
+        if (result.ok) {
+          const goalIndex = appState.goals.findIndex(g => g.id === goalId);
+          if (goalIndex !== -1) {
+            appState.goals[goalIndex].currentValue = result.data.goal.currentValue;
+          }
+          appState.goalLogs.push(result.data.log);
+          storage.save('appCache', appState);
+          modal.close();
+          toast.success('Progresso adicionado!');
+          router.render('goals');
+        } else {
+          toast.error(result.error || 'Erro ao adicionar progresso');
+        }
+      } catch (error) {
+        toast.error('Erro ao adicionar progresso');
+        console.error(error);
+      }
+    }
+  };
+
+  window.goalHandlers = goalHandlers;
+
+  // ============================================
+  // JOURNAL HANDLERS
+  // ============================================
+
+  const journalHandlers = {
+    saveEntry: async function() {
+      const mood = parseInt(document.getElementById('mood-input').value);
+      const energy = parseInt(document.getElementById('energy-input').value);
+      const note = document.getElementById('note-input').value;
+      const gratitude = document.getElementById('gratitude-input').value;
+      const today = utils.getTodayISO();
+      
+      try {
+        const result = await api.upsertJournalEntry(today, mood, energy, note, gratitude);
+        
+        if (result.ok) {
+          const existingIndex = appState.journals.findIndex(j => j.date === today);
+          if (existingIndex !== -1) {
+            Object.assign(appState.journals[existingIndex], result.data);
+          } else {
+            appState.journals.push(result.data);
+          }
+          storage.save('appCache', appState);
+          toast.success('Entrada salva!');
+          router.render('journal');
+        } else {
+          toast.error(result.error || 'Erro ao salvar entrada');
+        }
+      } catch (error) {
+        toast.error('Erro ao salvar entrada');
+        console.error(error);
+      }
+    }
+  };
+
+  window.journalHandlers = journalHandlers;
+
+  // ============================================
+  // SETTINGS HANDLERS
+  // ============================================
+
+  const settingsHandlers = {
+    savePreferences: function() {
+      appState.preferences.theme = document.getElementById('theme-select').value;
+      appState.preferences.weekStart = document.getElementById('week-start-select').value;
+      appState.preferences.timeFormat = document.getElementById('time-format-select').value;
+      appState.preferences.reduceAnimations = document.getElementById('reduce-animations').checked;
+      
+      storage.save('preferences', appState.preferences);
+      theme.apply(appState.preferences.theme);
+      
+      toast.success('Preferências salvas!');
+    },
+    
+    exportData: async function(format) {
+      try {
+        toast.info('Gerando arquivo de exportação...');
+        const result = await api.exportUserData(format);
+        
+        if (result.ok) {
+          const blob = new Blob([result.data], { type: result.contentType });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = result.filename;
+          a.click();
+          URL.revokeObjectURL(url);
+          toast.success('Dados exportados com sucesso!');
+        } else {
+          toast.error(result.error || 'Erro ao exportar dados');
+        }
+      } catch (error) {
+        toast.error('Erro ao exportar dados');
+        console.error(error);
+      }
+    }
+  };
+
+  window.settingsHandlers = settingsHandlers;
+
+  // ============================================
+  // INITIALIZATION
+  // ============================================
+
+  async function init() {
+    try {
+      // Carregar preferências
+      const savedPrefs = storage.load('preferences');
+      if (savedPrefs) {
+        Object.assign(appState.preferences, savedPrefs);
+      }
+      
+      // Aplicar tema
+      theme.init();
+      
+      // Tentar carregar cache
+      const cachedState = storage.load('appCache');
+      
+      // Identificar usuário
+      const savedUserKey = storage.load('userKey');
+      
+      // Inicializar app
+      const result = await api.initApp(savedUserKey);
+      
+      // Verificar se result não é null e tem a propriedade ok
+      if (result && result.ok) {
+        appState.userKey = result.data.userKey;
+        appState.habits = result.data.habits || [];
+        appState.habitLogs = result.data.habitLogs || [];
+        appState.tasks = result.data.tasks || [];
+        appState.taskChecklists = result.data.taskChecklists || [];
+        appState.goals = result.data.goals || [];
+        appState.goalLogs = result.data.goalLogs || [];
+        appState.journals = result.data.journals || [];
+        
+        // Salvar cache
+        storage.save('appCache', appState);
+        storage.save('userKey', appState.userKey);
+        
+        // Update user info
+        const userEmailEl = document.getElementById('user-email');
+        if (userEmailEl) {
+          userEmailEl.textContent = appState.userKey.includes('@') ? appState.userKey : 'Usuário Anônimo';
+        }
+        
+        appState.isOffline = false;
+      } else {
+        // Se result é null ou não tem ok, lançar erro
+        const errorMsg = result && result.error ? result.error : 'Erro ao conectar com o servidor';
+        throw new Error(errorMsg);
+      }
+    } catch (error) {
+      console.error('Erro ao inicializar:', error);
+      
+      // Tentar carregar do cache
+      const cachedState = storage.load('appCache');
+      if (cachedState) {
+        Object.assign(appState, cachedState);
+        appState.isOffline = true;
+        toast.error('Modo offline - usando dados em cache');
+      } else {
+        // Mostrar erro mais detalhado
+        const errorMsg = error.message || 'Não foi possível carregar o aplicativo';
+        toast.error(errorMsg);
+        
+        // Inicializar com dados vazios para não quebrar o app
+        appState.userKey = 'usuario_' + Date.now();
+        appState.habits = [];
+        appState.habitLogs = [];
+        appState.tasks = [];
+        appState.taskChecklists = [];
+        appState.goals = [];
+        appState.goalLogs = [];
+        appState.journals = [];
+      }
+    } finally {
+      // Esconder loading e mostrar app
+      const loadingScreen = document.getElementById('loading-screen');
+      const appContainer = document.getElementById('app');
+      
+      if (loadingScreen) loadingScreen.style.display = 'none';
+      if (appContainer) appContainer.style.display = 'grid';
+      
+      // Inicializar router
+      router.init();
+    }
+  }
+
+  // Expor router globalmente para uso nos botões
+  window.router = router;
+
+  // Iniciar quando o DOM estiver pronto
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+})();
+</script>

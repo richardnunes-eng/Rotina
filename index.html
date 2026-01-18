@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Routine App</title>
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <?!= include('styles'); ?>
+</head>
+<body>
+  
+  <!-- Loading inicial -->
+  <div id="loading-screen" class="loading-screen">
+    <div class="loading-spinner"></div>
+    <p>Carregando seu workspace...</p>
+  </div>
+
+  <!-- Container principal -->
+  <div id="app" class="app-container" style="display: none;">
+    
+    <!-- Sidebar (Desktop) -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <span class="material-icons">track_changes</span>
+          <h1>Routine</h1>
+        </div>
+        <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+          <span class="material-icons">brightness_6</span>
+        </button>
+      </div>
+      
+      <nav class="sidebar-nav">
+        <a href="#dashboard" class="nav-item active" data-view="dashboard">
+          <span class="material-icons">dashboard</span>
+          <span>Dashboard</span>
+        </a>
+        <a href="#habits" class="nav-item" data-view="habits">
+          <span class="material-icons">check_circle</span>
+          <span>Rotinas</span>
+        </a>
+        <a href="#tasks" class="nav-item" data-view="tasks">
+          <span class="material-icons">task_alt</span>
+          <span>Tarefas</span>
+        </a>
+        <a href="#goals" class="nav-item" data-view="goals">
+          <span class="material-icons">flag</span>
+          <span>Metas</span>
+        </a>
+        <a href="#journal" class="nav-item" data-view="journal">
+          <span class="material-icons">book</span>
+          <span>Diário</span>
+        </a>
+        <a href="#settings" class="nav-item" data-view="settings">
+          <span class="material-icons">settings</span>
+          <span>Configurações</span>
+        </a>
+      </nav>
+      
+      <div class="sidebar-footer">
+        <div class="user-info">
+          <span class="material-icons">account_circle</span>
+          <span id="user-email">Carregando...</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Conteúdo principal -->
+    <main class="main-content">
+      <div id="view-container"></div>
+    </main>
+
+    <!-- Bottom Navigation (Mobile) -->
+    <nav class="bottom-nav" id="bottom-nav">
+      <a href="#dashboard" class="nav-item active" data-view="dashboard">
+        <span class="material-icons">dashboard</span>
+        <span>Dashboard</span>
+      </a>
+      <a href="#habits" class="nav-item" data-view="habits">
+        <span class="material-icons">check_circle</span>
+        <span>Rotinas</span>
+      </a>
+      <a href="#tasks" class="nav-item" data-view="tasks">
+        <span class="material-icons">task_alt</span>
+        <span>Tarefas</span>
+      </a>
+      <a href="#goals" class="nav-item" data-view="goals">
+        <span class="material-icons">flag</span>
+        <span>Metas</span>
+      </a>
+      <a href="#journal" class="nav-item" data-view="journal">
+        <span class="material-icons">book</span>
+        <span>Diário</span>
+      </a>
+    </nav>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Modal Container -->
+  <div id="modal-container" class="modal-container"></div>
+
+  <?!= include('app'); ?>
+</body>
+</html>
