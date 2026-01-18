@@ -206,7 +206,26 @@ window.callServer = callServer;
         window.top.location.href = url;
       } catch (err) {
         console.error('Falha ao redirecionar para o Web App:', err);
-        alert('Falha ao redirecionar. Abra o Web App URL manualmente.');
+        try {
+          window.location.href = url;
+          return true;
+        } catch (innerErr) {
+          console.error('Falha ao redirecionar na mesma aba:', innerErr);
+        }
+
+        const loading = document.getElementById('loading-screen');
+        if (loading) {
+          loading.innerHTML = `<div style="max-width: 520px; text-align: center;">
+            <h2>Abra o Web App fora do iframe</h2>
+            <p>O navegador bloqueou o redirecionamento automatico.</p>
+            <p><a href="${url}" target="_top" rel="noopener">Abrir Web App</a></p>
+            <p>Se o link nao abrir, copie e cole no navegador:</p>
+            <input type="text" value="${url}" readonly style="width: 100%; padding: 10px;">
+          </div>`;
+          loading.style.display = 'flex';
+        } else {
+          alert('Falha ao redirecionar. Abra o Web App URL manualmente.');
+        }
       }
       return true;
     }
