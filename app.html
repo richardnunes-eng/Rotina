@@ -1626,34 +1626,71 @@
   // INITIALIZATION
   // ============================================
 
-  document.addEventListener('DOMContentLoaded', async function() {
-    theme.init();
-    
+  async function initializeApp() {
     const loadingScreen = document.getElementById('loading-screen');
     const appContainer = document.getElementById('app');
-    
+
     try {
       const result = await api.initApp();
-      
+
       if (result.ok) {
         Object.assign(appState, result.data);
         storage.save('appCache', appState);
-        
+
+        // Atualizar email do usuário na sidebar
+        const userEmailElement = document.getElementById('user-email');
+        if (userEmailElement) {
+          userEmailElement.textContent = result.data.userKey || 'Usuário';
+        }
+
         if (appContainer) {
           appContainer.style.display = '';
         }
         if (loadingScreen) {
           loadingScreen.style.display = 'none';
         }
-        
+
         router.init();
+        toast.success('Bem-vindo ao THX Ops!');
       } else {
-        toast.error('Erro ao carregar aplicação: ' + (result.error || 'Desconhecido'));
+        // Se houver erro, mostrar tela de erro
+        showErrorScreen(result.error || 'Erro desconhecido ao carregar aplicação');
       }
     } catch (error) {
       console.error('Erro na inicialização:', error);
-      toast.error('Erro ao inicializar aplicação');
+      showErrorScreen('Erro ao inicializar aplicação. Por favor, recarregue a página.');
     }
+  }
+
+  function showErrorScreen(message) {
+    const loadingScreen = document.getElementById('loading-screen');
+    if (loadingScreen) {
+      loadingScreen.innerHTML = `
+        <div style="text-align: center; max-width: 400px;">
+          <span class="material-icons" style="font-size: 72px; color: var(--accent-red); margin-bottom: 24px;">error</span>
+          <h2 style="margin-bottom: 16px; color: var(--text-primary);">Erro ao carregar</h2>
+          <p style="color: var(--text-secondary); margin-bottom: 24px;">${utils.sanitize(message)}</p>
+          <button class="btn btn-primary" onclick="window.location.reload()">
+            <span class="material-icons">refresh</span>
+            Tentar novamente
+          </button>
+        </div>
+      `;
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    theme.init();
+
+    // Verificar se há dados em cache para carregar rapidamente
+    const cachedData = storage.load('appCache');
+    if (cachedData && cachedData.userKey) {
+      console.log('Dados em cache encontrados, carregando...');
+      Object.assign(appState, cachedData);
+    }
+
+    // Inicializar app
+    initializeApp();
   });
 
 })();
