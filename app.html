@@ -631,10 +631,15 @@
           <div class="card ${completed ? 'glow-green' : ''}">
             <div class="flex-between mb-md">
               <h3>${utils.sanitize(habit.name)}</h3>
-              <button class="btn btn-sm ${completed ? 'btn-success' : 'btn-secondary'}"
-                      onclick="habitHandlers.toggleToday('${habit.id}')">
-                <span class="material-icons">${completed ? 'check_circle' : 'radio_button_unchecked'}</span>
-              </button>
+              <div class="flex gap-sm">
+                <button class="btn btn-sm btn-secondary" onclick="habitHandlers.openEditModal('${habit.id}')" title="Editar">
+                  <span class="material-icons">edit</span>
+                </button>
+                <button class="btn btn-sm ${completed ? 'btn-success' : 'btn-secondary'}"
+                        onclick="habitHandlers.toggleToday('${habit.id}')" title="${completed ? 'Desmarcar' : 'Concluir'}">
+                  <span class="material-icons">${completed ? 'check_circle' : 'radio_button_unchecked'}</span>
+                </button>
+              </div>
             </div>
             <p style="color: var(--text-secondary); margin-bottom: 12px;">${utils.sanitize(habit.description || '')}</p>
             <div class="flex gap-md">
@@ -846,12 +851,17 @@
           <div class="card ${isComplete ? 'glow-green' : 'glow-blue'}">
             <div class="flex-between mb-md">
               <h3>${utils.sanitize(goal.name)}</h3>
-              ${isComplete ? '<span class="badge badge-low">✅ Concluída</span>' : ''}
+              <div class="flex gap-sm" style="align-items: center;">
+                ${isComplete ? '<span class="badge badge-low">✅ Concluída</span>' : ''}
+                <button class="btn btn-sm btn-secondary" onclick="goalHandlers.openEditModal('${goal.id}')" title="Editar">
+                  <span class="material-icons">edit</span>
+                </button>
+              </div>
             </div>
             <p style="color: var(--text-secondary); margin-bottom: 16px;">${utils.sanitize(goal.description || '')}</p>
 
             <div class="flex-between mb-sm">
-              <span style="font-size: 24px; font-weight: 700;">${goal.currentValue || 0} / ${goal.targetValue}</span>
+              <span style="font-size: 24px; font-weight: 700;">${goal.currentValue || 0} / ${goal.targetValue} ${goal.unit ? utils.sanitize(goal.unit) : ''}</span>
               <span style="font-size: 18px; font-weight: 600; color: var(--accent-blue);">${Math.round(progress)}%</span>
             </div>
 
@@ -935,7 +945,173 @@
     },
 
     openCreateModal: function() {
-      toast.info('Funcionalidade em desenvolvimento');
+      const content = `
+        <form id="create-habit-form">
+          <div class="form-group">
+            <label class="form-label">Nome da Rotina *</label>
+            <input type="text" class="form-input" id="habit-name" placeholder="Ex: Exercício matinal" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Descrição</label>
+            <textarea class="form-textarea" id="habit-description" placeholder="Descreva sua rotina..."></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Categoria</label>
+            <select class="form-select" id="habit-category">
+              <option value="health">🏃 Saúde</option>
+              <option value="productivity">💼 Produtividade</option>
+              <option value="learning">📚 Aprendizado</option>
+              <option value="mindfulness">🧘 Mindfulness</option>
+              <option value="social">👥 Social</option>
+              <option value="finance">💰 Finanças</option>
+              <option value="other">📌 Outro</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Frequência</label>
+            <select class="form-select" id="habit-frequency">
+              <option value="daily">Diária</option>
+              <option value="weekly">Semanal</option>
+              <option value="custom">Personalizada</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">
+              <input type="checkbox" class="form-checkbox" id="habit-reminder">
+              <span style="margin-left: 8px;">Ativar lembrete</span>
+            </label>
+          </div>
+        </form>
+      `;
+
+      modal.open('Nova Rotina', content, [
+        { label: 'Cancelar', onclick: 'modal.close()', primary: false },
+        { label: 'Criar Rotina', onclick: 'habitHandlers.createHabit()', primary: true }
+      ]);
+    },
+
+    createHabit: async function() {
+      const name = document.getElementById('habit-name').value.trim();
+      const description = document.getElementById('habit-description').value.trim();
+      const category = document.getElementById('habit-category').value;
+      const frequency = document.getElementById('habit-frequency').value;
+      const reminder = document.getElementById('habit-reminder').checked;
+
+      if (!name) {
+        toast.error('Por favor, preencha o nome da rotina');
+        return;
+      }
+
+      const habitData = {
+        name,
+        description,
+        category,
+        frequency,
+        reminder,
+        active: true
+      };
+
+      const result = await api.createHabit(habitData);
+
+      if (result.ok) {
+        Object.assign(appState, result.data);
+        modal.close();
+        router.render(appState.currentView);
+        toast.success('Rotina criada com sucesso!');
+      } else {
+        toast.error('Erro ao criar rotina: ' + result.error);
+      }
+    },
+
+    openEditModal: function(habitId) {
+      const habit = appState.habits.find(h => h.id === habitId);
+      if (!habit) {
+        toast.error('Rotina não encontrada');
+        return;
+      }
+
+      const content = `
+        <form id="edit-habit-form">
+          <div class="form-group">
+            <label class="form-label">Nome da Rotina *</label>
+            <input type="text" class="form-input" id="edit-habit-name" value="${utils.sanitize(habit.name)}" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Descrição</label>
+            <textarea class="form-textarea" id="edit-habit-description">${utils.sanitize(habit.description || '')}</textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Categoria</label>
+            <select class="form-select" id="edit-habit-category">
+              <option value="health" ${habit.category === 'health' ? 'selected' : ''}>🏃 Saúde</option>
+              <option value="productivity" ${habit.category === 'productivity' ? 'selected' : ''}>💼 Produtividade</option>
+              <option value="learning" ${habit.category === 'learning' ? 'selected' : ''}>📚 Aprendizado</option>
+              <option value="mindfulness" ${habit.category === 'mindfulness' ? 'selected' : ''}>🧘 Mindfulness</option>
+              <option value="social" ${habit.category === 'social' ? 'selected' : ''}>👥 Social</option>
+              <option value="finance" ${habit.category === 'finance' ? 'selected' : ''}>💰 Finanças</option>
+              <option value="other" ${habit.category === 'other' ? 'selected' : ''}>📌 Outro</option>
+            </select>
+          </div>
+
+          <div style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border-color);">
+            <button type="button" class="btn btn-danger w-full" onclick="habitHandlers.deleteHabit('${habitId}')">
+              <span class="material-icons">delete</span>
+              Excluir Rotina
+            </button>
+          </div>
+        </form>
+      `;
+
+      modal.open('Editar Rotina', content, [
+        { label: 'Cancelar', onclick: 'modal.close()', primary: false },
+        { label: 'Salvar', onclick: 'habitHandlers.updateHabit("' + habitId + '")', primary: true }
+      ]);
+    },
+
+    updateHabit: async function(habitId) {
+      const name = document.getElementById('edit-habit-name').value.trim();
+      const description = document.getElementById('edit-habit-description').value.trim();
+      const category = document.getElementById('edit-habit-category').value;
+
+      if (!name) {
+        toast.error('Por favor, preencha o nome da rotina');
+        return;
+      }
+
+      const updates = { name, description, category };
+      const result = await api.updateHabit(habitId, updates);
+
+      if (result.ok) {
+        Object.assign(appState, result.data);
+        modal.close();
+        router.render(appState.currentView);
+        toast.success('Rotina atualizada!');
+      } else {
+        toast.error('Erro ao atualizar rotina: ' + result.error);
+      }
+    },
+
+    deleteHabit: async function(habitId) {
+      if (!confirm('Tem certeza que deseja excluir esta rotina? Esta ação não pode ser desfeita.')) {
+        return;
+      }
+
+      const result = await api.deleteHabit(habitId);
+
+      if (result.ok) {
+        Object.assign(appState, result.data);
+        modal.close();
+        router.render(appState.currentView);
+        toast.success('Rotina excluída!');
+      } else {
+        toast.error('Erro ao excluir rotina: ' + result.error);
+      }
     }
   };
 
@@ -953,17 +1129,462 @@
     },
 
     openCreateModal: function() {
-      toast.info('Funcionalidade em desenvolvimento');
+      const content = `
+        <form id="create-task-form">
+          <div class="form-group">
+            <label class="form-label">Título da Tarefa *</label>
+            <input type="text" class="form-input" id="task-title" placeholder="Ex: Finalizar relatório" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Descrição</label>
+            <textarea class="form-textarea" id="task-description" placeholder="Descreva os detalhes da tarefa..."></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Prioridade</label>
+            <select class="form-select" id="task-priority">
+              <option value="low">🟢 Baixa</option>
+              <option value="normal" selected>🔵 Normal</option>
+              <option value="high">🟡 Alta</option>
+              <option value="urgent">🔴 Urgente</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Status</label>
+            <select class="form-select" id="task-status">
+              <option value="todo" selected>📋 A Fazer</option>
+              <option value="doing">⚡ Em Andamento</option>
+              <option value="done">✅ Concluído</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Data de Vencimento</label>
+            <input type="date" class="form-input" id="task-due-date">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Categoria</label>
+            <input type="text" class="form-input" id="task-category" placeholder="Ex: Trabalho, Pessoal, Estudos">
+          </div>
+        </form>
+      `;
+
+      modal.open('Nova Tarefa', content, [
+        { label: 'Cancelar', onclick: 'modal.close()', primary: false },
+        { label: 'Criar Tarefa', onclick: 'taskHandlers.createTask()', primary: true }
+      ]);
+    },
+
+    createTask: async function() {
+      const title = document.getElementById('task-title').value.trim();
+      const description = document.getElementById('task-description').value.trim();
+      const priority = document.getElementById('task-priority').value;
+      const status = document.getElementById('task-status').value;
+      const dueDate = document.getElementById('task-due-date').value;
+      const category = document.getElementById('task-category').value.trim();
+
+      if (!title) {
+        toast.error('Por favor, preencha o título da tarefa');
+        return;
+      }
+
+      const taskData = {
+        title,
+        description,
+        priority,
+        status,
+        dueDate: dueDate || null,
+        category: category || null
+      };
+
+      const result = await api.createTask(taskData);
+
+      if (result.ok) {
+        Object.assign(appState, result.data);
+        modal.close();
+        router.render(appState.currentView);
+        toast.success('Tarefa criada com sucesso!');
+      } else {
+        toast.error('Erro ao criar tarefa: ' + result.error);
+      }
     },
 
     openEditModal: function(taskId) {
-      toast.info('Funcionalidade em desenvolvimento');
+      const task = appState.tasks.find(t => t.id === taskId);
+      if (!task) {
+        toast.error('Tarefa não encontrada');
+        return;
+      }
+
+      const content = `
+        <form id="edit-task-form">
+          <div class="form-group">
+            <label class="form-label">Título da Tarefa *</label>
+            <input type="text" class="form-input" id="edit-task-title" value="${utils.sanitize(task.title)}" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Descrição</label>
+            <textarea class="form-textarea" id="edit-task-description">${utils.sanitize(task.description || '')}</textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Prioridade</label>
+            <select class="form-select" id="edit-task-priority">
+              <option value="low" ${task.priority === 'low' ? 'selected' : ''}>🟢 Baixa</option>
+              <option value="normal" ${task.priority === 'normal' ? 'selected' : ''}>🔵 Normal</option>
+              <option value="high" ${task.priority === 'high' ? 'selected' : ''}>🟡 Alta</option>
+              <option value="urgent" ${task.priority === 'urgent' ? 'selected' : ''}>🔴 Urgente</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Status</label>
+            <select class="form-select" id="edit-task-status">
+              <option value="todo" ${task.status === 'todo' ? 'selected' : ''}>📋 A Fazer</option>
+              <option value="doing" ${task.status === 'doing' ? 'selected' : ''}>⚡ Em Andamento</option>
+              <option value="done" ${task.status === 'done' ? 'selected' : ''}>✅ Concluído</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Data de Vencimento</label>
+            <input type="date" class="form-input" id="edit-task-due-date" value="${task.dueDate || ''}">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Categoria</label>
+            <input type="text" class="form-input" id="edit-task-category" value="${utils.sanitize(task.category || '')}">
+          </div>
+
+          <div style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border-color);">
+            <button type="button" class="btn btn-danger w-full" onclick="taskHandlers.deleteTask('${taskId}')">
+              <span class="material-icons">delete</span>
+              Excluir Tarefa
+            </button>
+          </div>
+        </form>
+      `;
+
+      modal.open('Editar Tarefa', content, [
+        { label: 'Cancelar', onclick: 'modal.close()', primary: false },
+        { label: 'Salvar', onclick: 'taskHandlers.updateTask("' + taskId + '")', primary: true }
+      ]);
+    },
+
+    updateTask: async function(taskId) {
+      const title = document.getElementById('edit-task-title').value.trim();
+      const description = document.getElementById('edit-task-description').value.trim();
+      const priority = document.getElementById('edit-task-priority').value;
+      const status = document.getElementById('edit-task-status').value;
+      const dueDate = document.getElementById('edit-task-due-date').value;
+      const category = document.getElementById('edit-task-category').value.trim();
+
+      if (!title) {
+        toast.error('Por favor, preencha o título da tarefa');
+        return;
+      }
+
+      const updates = {
+        title,
+        description,
+        priority,
+        status,
+        dueDate: dueDate || null,
+        category: category || null
+      };
+
+      const result = await api.updateTask(taskId, updates);
+
+      if (result.ok) {
+        Object.assign(appState, result.data);
+        modal.close();
+        router.render(appState.currentView);
+        toast.success('Tarefa atualizada!');
+      } else {
+        toast.error('Erro ao atualizar tarefa: ' + result.error);
+      }
+    },
+
+    deleteTask: async function(taskId) {
+      if (!confirm('Tem certeza que deseja excluir esta tarefa? Esta ação não pode ser desfeita.')) {
+        return;
+      }
+
+      const result = await api.deleteTask(taskId);
+
+      if (result.ok) {
+        Object.assign(appState, result.data);
+        modal.close();
+        router.render(appState.currentView);
+        toast.success('Tarefa excluída!');
+      } else {
+        toast.error('Erro ao excluir tarefa: ' + result.error);
+      }
     }
   };
 
   const goalHandlers = {
     openCreateModal: function() {
-      toast.info('Funcionalidade em desenvolvimento');
+      const content = `
+        <form id="create-goal-form">
+          <div class="form-group">
+            <label class="form-label">Nome da Meta *</label>
+            <input type="text" class="form-input" id="goal-name" placeholder="Ex: Ler 12 livros" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Descrição</label>
+            <textarea class="form-textarea" id="goal-description" placeholder="Descreva sua meta..."></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Valor Atual</label>
+            <input type="number" class="form-input" id="goal-current" value="0" min="0" step="1">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Valor Alvo *</label>
+            <input type="number" class="form-input" id="goal-target" placeholder="Ex: 12" required min="1" step="1">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Unidade</label>
+            <input type="text" class="form-input" id="goal-unit" placeholder="Ex: livros, km, horas">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Prazo</label>
+            <input type="date" class="form-input" id="goal-deadline">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Categoria</label>
+            <select class="form-select" id="goal-category">
+              <option value="health">🏃 Saúde</option>
+              <option value="career">💼 Carreira</option>
+              <option value="learning">📚 Aprendizado</option>
+              <option value="finance">💰 Finanças</option>
+              <option value="personal">🎯 Pessoal</option>
+              <option value="other">📌 Outro</option>
+            </select>
+          </div>
+        </form>
+      `;
+
+      modal.open('Nova Meta', content, [
+        { label: 'Cancelar', onclick: 'modal.close()', primary: false },
+        { label: 'Criar Meta', onclick: 'goalHandlers.createGoal()', primary: true }
+      ]);
+    },
+
+    createGoal: async function() {
+      const name = document.getElementById('goal-name').value.trim();
+      const description = document.getElementById('goal-description').value.trim();
+      const currentValue = parseInt(document.getElementById('goal-current').value) || 0;
+      const targetValue = parseInt(document.getElementById('goal-target').value);
+      const unit = document.getElementById('goal-unit').value.trim();
+      const deadline = document.getElementById('goal-deadline').value;
+      const category = document.getElementById('goal-category').value;
+
+      if (!name) {
+        toast.error('Por favor, preencha o nome da meta');
+        return;
+      }
+
+      if (!targetValue || targetValue <= 0) {
+        toast.error('Por favor, defina um valor alvo válido');
+        return;
+      }
+
+      const goalData = {
+        name,
+        description,
+        currentValue,
+        targetValue,
+        unit: unit || null,
+        deadline: deadline || null,
+        category,
+        status: 'active'
+      };
+
+      const result = await api.createGoal(goalData);
+
+      if (result.ok) {
+        Object.assign(appState, result.data);
+        modal.close();
+        router.render(appState.currentView);
+        toast.success('Meta criada com sucesso!');
+      } else {
+        toast.error('Erro ao criar meta: ' + result.error);
+      }
+    },
+
+    openEditModal: function(goalId) {
+      const goal = appState.goals.find(g => g.id === goalId);
+      if (!goal) {
+        toast.error('Meta não encontrada');
+        return;
+      }
+
+      const content = `
+        <form id="edit-goal-form">
+          <div class="form-group">
+            <label class="form-label">Nome da Meta *</label>
+            <input type="text" class="form-input" id="edit-goal-name" value="${utils.sanitize(goal.name)}" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Descrição</label>
+            <textarea class="form-textarea" id="edit-goal-description">${utils.sanitize(goal.description || '')}</textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Progresso Atual</label>
+            <div class="flex gap-sm" style="align-items: center;">
+              <input type="number" class="form-input" id="edit-goal-current" value="${goal.currentValue || 0}" min="0" step="1" style="flex: 1;">
+              <span style="color: var(--text-secondary);">/ ${goal.targetValue}</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Adicionar Progresso</label>
+            <div class="flex gap-sm">
+              <input type="number" class="form-input" id="goal-progress-delta" placeholder="+10" step="1" style="flex: 1;">
+              <button type="button" class="btn btn-primary" onclick="goalHandlers.addProgress('${goalId}')">
+                <span class="material-icons">add</span>
+              </button>
+            </div>
+            <small style="color: var(--text-tertiary); font-size: 12px;">Digite um valor positivo ou negativo</small>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Valor Alvo *</label>
+            <input type="number" class="form-input" id="edit-goal-target" value="${goal.targetValue}" required min="1" step="1">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Unidade</label>
+            <input type="text" class="form-input" id="edit-goal-unit" value="${utils.sanitize(goal.unit || '')}">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Prazo</label>
+            <input type="date" class="form-input" id="edit-goal-deadline" value="${goal.deadline || ''}">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Categoria</label>
+            <select class="form-select" id="edit-goal-category">
+              <option value="health" ${goal.category === 'health' ? 'selected' : ''}>🏃 Saúde</option>
+              <option value="career" ${goal.category === 'career' ? 'selected' : ''}>💼 Carreira</option>
+              <option value="learning" ${goal.category === 'learning' ? 'selected' : ''}>📚 Aprendizado</option>
+              <option value="finance" ${goal.category === 'finance' ? 'selected' : ''}>💰 Finanças</option>
+              <option value="personal" ${goal.category === 'personal' ? 'selected' : ''}>🎯 Pessoal</option>
+              <option value="other" ${goal.category === 'other' ? 'selected' : ''}>📌 Outro</option>
+            </select>
+          </div>
+
+          <div style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border-color);">
+            <button type="button" class="btn btn-danger w-full" onclick="goalHandlers.deleteGoal('${goalId}')">
+              <span class="material-icons">delete</span>
+              Excluir Meta
+            </button>
+          </div>
+        </form>
+      `;
+
+      modal.open('Editar Meta', content, [
+        { label: 'Cancelar', onclick: 'modal.close()', primary: false },
+        { label: 'Salvar', onclick: 'goalHandlers.updateGoal("' + goalId + '")', primary: true }
+      ]);
+    },
+
+    updateGoal: async function(goalId) {
+      const name = document.getElementById('edit-goal-name').value.trim();
+      const description = document.getElementById('edit-goal-description').value.trim();
+      const currentValue = parseInt(document.getElementById('edit-goal-current').value) || 0;
+      const targetValue = parseInt(document.getElementById('edit-goal-target').value);
+      const unit = document.getElementById('edit-goal-unit').value.trim();
+      const deadline = document.getElementById('edit-goal-deadline').value;
+      const category = document.getElementById('edit-goal-category').value;
+
+      if (!name) {
+        toast.error('Por favor, preencha o nome da meta');
+        return;
+      }
+
+      if (!targetValue || targetValue <= 0) {
+        toast.error('Por favor, defina um valor alvo válido');
+        return;
+      }
+
+      const updates = {
+        name,
+        description,
+        currentValue,
+        targetValue,
+        unit: unit || null,
+        deadline: deadline || null,
+        category
+      };
+
+      const result = await api.updateGoal(goalId, updates);
+
+      if (result.ok) {
+        Object.assign(appState, result.data);
+        modal.close();
+        router.render(appState.currentView);
+        toast.success('Meta atualizada!');
+      } else {
+        toast.error('Erro ao atualizar meta: ' + result.error);
+      }
+    },
+
+    addProgress: async function(goalId) {
+      const deltaInput = document.getElementById('goal-progress-delta');
+      const delta = parseInt(deltaInput.value);
+
+      if (!delta || delta === 0) {
+        toast.error('Por favor, insira um valor válido');
+        return;
+      }
+
+      const result = await api.addGoalProgress(goalId, delta, '', utils.getTodayISO());
+
+      if (result.ok) {
+        Object.assign(appState, result.data);
+        toast.success('Progresso adicionado!');
+        deltaInput.value = '';
+
+        // Atualizar o valor atual no modal
+        const goal = appState.goals.find(g => g.id === goalId);
+        if (goal) {
+          document.getElementById('edit-goal-current').value = goal.currentValue || 0;
+        }
+      } else {
+        toast.error('Erro ao adicionar progresso: ' + result.error);
+      }
+    },
+
+    deleteGoal: async function(goalId) {
+      if (!confirm('Tem certeza que deseja excluir esta meta? Esta ação não pode ser desfeita.')) {
+        return;
+      }
+
+      const result = await api.deleteGoal(goalId);
+
+      if (result.ok) {
+        Object.assign(appState, result.data);
+        modal.close();
+        router.render(appState.currentView);
+        toast.success('Meta excluída!');
+      } else {
+        toast.error('Erro ao excluir meta: ' + result.error);
+      }
     }
   };
 
