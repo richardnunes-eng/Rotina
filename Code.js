@@ -1032,17 +1032,13 @@ function exportUserData(userKey, format) {
       return { ok: true, data: json, contentType: 'application/json', filename: 'routine_app_export.json' };
     } else if (format === 'csv') {
       let csv = '';
-      
+
       Object.keys(data.data).forEach(key => {
         if (Array.isArray(data.data[key]) && data.data[key].length > 0) {
-          csv += `
-
-=== ${key.toUpperCase()} ===
-`;
+          csv += '\n\n=== ' + String(key).toUpperCase() + ' ===\n';
           const headers = Object.keys(data.data[key][0]);
-          csv += headers.join(',') + '
-';
-          
+          csv += headers.join(',') + '\n';
+
           data.data[key].forEach(row => {
             const values = headers.map(h => {
               let val = row[h];
@@ -1051,12 +1047,11 @@ function exportUserData(userKey, format) {
               }
               return val;
             });
-            csv += values.join(',') + '
-';
+            csv += values.join(',') + '\n';
           });
         }
       });
-      
+
       return { ok: true, data: csv, contentType: 'text/csv', filename: 'routine_app_export.csv' };
     }
     
@@ -1096,14 +1091,27 @@ function getClickUpToken() {
  * @param {string} token - Token da API do ClickUp
  */
 function setClickUpToken(token) {
-  if (!token || token.trim() === '') {
-    throw new Error('Token invÃ¡lido');
+  const cleanToken = String(token || '').trim();
+  if (!cleanToken) {
+    throw new Error('Token invalido. Use setClickUpToken("pk_...")');
   }
-  PropertiesService.getScriptProperties().setProperty('CLICKUP_API_KEY', token.trim());
+  PropertiesService.getScriptProperties().setProperty('CLICKUP_API_KEY', cleanToken);
   log('Token do ClickUp configurado com sucesso');
   return { ok: true, message: 'Token configurado' };
 }
 
+/**
+ * Testa o token do ClickUp
+ */
+function testClickUpAuth() {
+  return safeExecute('testClickUpAuth', () => {
+    const result = clickupRequest('GET', '/user');
+    if (!result.ok) {
+      return { ok: false, error: result.error, statusCode: result.statusCode };
+    }
+    return { ok: true, user: result.data.user || result.data };
+  });
+}
 /**
  * EXECUTAR UMA VEZ: Inicializa a integraÃ§Ã£o com ClickUp
  * Define o token e cria as estruturas necessÃ¡rias
