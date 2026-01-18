@@ -472,30 +472,447 @@
   };
 
   // ============================================
-  // VIEWS (Placeholder - Full implementation in original)
+  // VIEWS - Full Implementation
   // ============================================
 
   const views = {
     renderDashboard: function(container) {
-      container.innerHTML = '<div><h1>Dashboard</h1><p>Carregando...</p></div>';
+      const today = utils.getTodayISO();
+      const completedHabitsToday = appState.habitLogs.filter(log =>
+        log.date === today && log.completed
+      ).length;
+      const totalHabits = appState.habits.filter(h => h.active !== false).length;
+      const activeTasks = appState.tasks.filter(t => t.status !== 'done').length;
+      const activeGoals = appState.goals.filter(g => g.status === 'active').length;
+
+      container.innerHTML = `
+        <div>
+          <h1>Dashboard</h1>
+
+          <div class="kpi-grid">
+            <div class="kpi-card glow-blue">
+              <div class="kpi-label">Rotinas Hoje</div>
+              <div class="kpi-value">${completedHabitsToday}/${totalHabits}</div>
+              <div class="kpi-change">${Math.round((completedHabitsToday/totalHabits)*100) || 0}% concluído</div>
+            </div>
+
+            <div class="kpi-card glow-orange">
+              <div class="kpi-label">Tarefas Ativas</div>
+              <div class="kpi-value">${activeTasks}</div>
+              <div class="kpi-change">Pendentes</div>
+            </div>
+
+            <div class="kpi-card glow-green">
+              <div class="kpi-label">Metas Ativas</div>
+              <div class="kpi-value">${activeGoals}</div>
+              <div class="kpi-change">Em progresso</div>
+            </div>
+
+            <div class="kpi-card glow-purple">
+              <div class="kpi-label">Produtividade</div>
+              <div class="kpi-value">${Math.round(((completedHabitsToday/totalHabits)*100 || 0))}%</div>
+              <div class="kpi-change">Score geral</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h2 class="card-title">Rotinas de Hoje</h2>
+              <a href="#habits" class="btn btn-sm btn-primary">Ver todas</a>
+            </div>
+            <div id="dashboard-habits-list"></div>
+          </div>
+
+          <div class="card mt-md">
+            <div class="card-header">
+              <h2 class="card-title">Tarefas Recentes</h2>
+              <a href="#tasks" class="btn btn-sm btn-primary">Ver todas</a>
+            </div>
+            <div id="dashboard-tasks-list"></div>
+          </div>
+        </div>
+      `;
+
+      this.renderDashboardHabits();
+      this.renderDashboardTasks();
     },
+
+    renderDashboardHabits: function() {
+      const container = document.getElementById('dashboard-habits-list');
+      const activeHabits = appState.habits.filter(h => h.active !== false).slice(0, 5);
+
+      if (activeHabits.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>Nenhuma rotina cadastrada</p></div>';
+        return;
+      }
+
+      const today = utils.getTodayISO();
+      container.innerHTML = activeHabits.map(habit => {
+        const log = appState.habitLogs.find(l => l.habitId === habit.id && l.date === today);
+        const completed = log?.completed || false;
+
+        return `
+          <div class="flex-between" style="padding: 12px; border-bottom: 1px solid var(--border-color);">
+            <div>
+              <strong>${utils.sanitize(habit.name)}</strong>
+              <p style="font-size: 13px; color: var(--text-secondary); margin: 4px 0 0 0;">${utils.sanitize(habit.description || '')}</p>
+            </div>
+            <button class="btn btn-sm ${completed ? 'btn-success' : 'btn-secondary'}"
+                    onclick="habitHandlers.toggleToday('${habit.id}')">
+              <span class="material-icons">${completed ? 'check_circle' : 'radio_button_unchecked'}</span>
+            </button>
+          </div>
+        `;
+      }).join('');
+    },
+
+    renderDashboardTasks: function() {
+      const container = document.getElementById('dashboard-tasks-list');
+      const activeTasks = appState.tasks.filter(t => t.status !== 'done').slice(0, 5);
+
+      if (activeTasks.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>Nenhuma tarefa ativa</p></div>';
+        return;
+      }
+
+      container.innerHTML = activeTasks.map(task => `
+        <div class="flex-between" style="padding: 12px; border-bottom: 1px solid var(--border-color);">
+          <div>
+            <strong>${utils.sanitize(task.title)}</strong>
+            <p style="font-size: 13px; color: var(--text-secondary); margin: 4px 0 0 0;">
+              ${task.status === 'todo' ? '📋 A fazer' : task.status === 'doing' ? '⚡ Em andamento' : '✅ Concluído'}
+            </p>
+          </div>
+          <a href="#tasks" class="btn btn-sm btn-secondary">Ver</a>
+        </div>
+      `).join('');
+    },
+
     renderHabits: function(container) {
-      container.innerHTML = '<div><h1>Rotinas</h1><p>Carregando...</p></div>';
+      container.innerHTML = `
+        <div>
+          <div class="flex-between mb-lg">
+            <h1>Rotinas</h1>
+            <button class="btn btn-primary" onclick="habitHandlers.openCreateModal()">
+              <span class="material-icons">add</span>
+              Nova Rotina
+            </button>
+          </div>
+
+          <div id="habits-list"></div>
+        </div>
+      `;
+
+      this.renderHabitsList();
     },
+
+    renderHabitsList: function() {
+      const container = document.getElementById('habits-list');
+      const habits = appState.habits.filter(h => h.active !== false);
+
+      if (habits.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons empty-state-icon">check_circle</span>
+            <h3 class="empty-state-title">Nenhuma rotina cadastrada</h3>
+            <p class="empty-state-description">Crie sua primeira rotina para começar!</p>
+          </div>
+        `;
+        return;
+      }
+
+      const today = utils.getTodayISO();
+      container.innerHTML = `<div class="grid">${habits.map(habit => {
+        const log = appState.habitLogs.find(l => l.habitId === habit.id && l.date === today);
+        const completed = log?.completed || false;
+        const streak = utils.calculateStreak(appState.habitLogs, habit.id);
+
+        return `
+          <div class="card ${completed ? 'glow-green' : ''}">
+            <div class="flex-between mb-md">
+              <h3>${utils.sanitize(habit.name)}</h3>
+              <button class="btn btn-sm ${completed ? 'btn-success' : 'btn-secondary'}"
+                      onclick="habitHandlers.toggleToday('${habit.id}')">
+                <span class="material-icons">${completed ? 'check_circle' : 'radio_button_unchecked'}</span>
+              </button>
+            </div>
+            <p style="color: var(--text-secondary); margin-bottom: 12px;">${utils.sanitize(habit.description || '')}</p>
+            <div class="flex gap-md">
+              <div style="flex: 1;">
+                <small style="color: var(--text-tertiary);">Sequência Atual</small>
+                <div style="font-size: 24px; font-weight: 700; color: var(--accent-blue);">${streak.current} 🔥</div>
+              </div>
+              <div style="flex: 1;">
+                <small style="color: var(--text-tertiary);">Melhor Sequência</small>
+                <div style="font-size: 24px; font-weight: 700; color: var(--accent-purple);">${streak.max} ⭐</div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('')}</div>`;
+    },
+
     renderTasks: function(container) {
-      container.innerHTML = '<div><h1>Tarefas</h1><p>Carregando...</p></div>';
+      container.innerHTML = `
+        <div>
+          <div class="flex-between mb-lg">
+            <h1>Tarefas</h1>
+            <button class="btn btn-primary" onclick="taskHandlers.openCreateModal()">
+              <span class="material-icons">add</span>
+              Nova Tarefa
+            </button>
+          </div>
+
+          <div id="tasks-list"></div>
+        </div>
+      `;
+
+      this.renderTasksList();
     },
+
+    renderTasksList: function() {
+      const container = document.getElementById('tasks-list');
+      const tasks = appState.tasks;
+
+      if (tasks.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons empty-state-icon">task_alt</span>
+            <h3 class="empty-state-title">Nenhuma tarefa cadastrada</h3>
+            <p class="empty-state-description">Crie sua primeira tarefa!</p>
+          </div>
+        `;
+        return;
+      }
+
+      const todoTasks = tasks.filter(t => t.status === 'todo');
+      const doingTasks = tasks.filter(t => t.status === 'doing');
+      const doneTasks = tasks.filter(t => t.status === 'done');
+
+      container.innerHTML = `
+        <div class="grid grid-3">
+          <div>
+            <h3 style="margin-bottom: 16px;">📋 A Fazer (${todoTasks.length})</h3>
+            <div class="grid gap-sm">
+              ${todoTasks.map(t => this.renderTaskCard(t)).join('')}
+            </div>
+          </div>
+          <div>
+            <h3 style="margin-bottom: 16px;">⚡ Em Andamento (${doingTasks.length})</h3>
+            <div class="grid gap-sm">
+              ${doingTasks.map(t => this.renderTaskCard(t)).join('')}
+            </div>
+          </div>
+          <div>
+            <h3 style="margin-bottom: 16px;">✅ Concluído (${doneTasks.length})</h3>
+            <div class="grid gap-sm">
+              ${doneTasks.map(t => this.renderTaskCard(t)).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    },
+
+    renderTaskCard: function(task) {
+      const priorityColors = {
+        urgent: 'badge-urgent',
+        high: 'badge-high',
+        normal: 'badge-normal',
+        low: 'badge-low'
+      };
+
+      return `
+        <div class="card">
+          <div class="flex-between mb-sm">
+            <strong>${utils.sanitize(task.title)}</strong>
+            <span class="badge ${priorityColors[task.priority] || 'badge-normal'}">${task.priority || 'normal'}</span>
+          </div>
+          <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">
+            ${utils.sanitize(task.description || '')}
+          </p>
+          <div class="flex gap-sm">
+            ${task.status !== 'done' ? `
+              <button class="btn btn-sm btn-success" onclick="taskHandlers.setStatus('${task.id}', 'done')" style="flex: 1;">
+                Concluir
+              </button>
+            ` : ''}
+            <button class="btn btn-sm btn-secondary" onclick="taskHandlers.openEditModal('${task.id}')" style="flex: 1;">
+              Editar
+            </button>
+          </div>
+        </div>
+      `;
+    },
+
     renderKanban: function(container) {
-      container.innerHTML = '<div><h1>Kanban</h1><p>Carregando...</p></div>';
+      container.innerHTML = `
+        <div>
+          <h1>Kanban</h1>
+          <p style="color: var(--text-secondary); margin-bottom: 24px;">Visualização em kanban das suas tarefas</p>
+          <div id="kanban-board"></div>
+        </div>
+      `;
+
+      this.renderKanbanBoard();
     },
+
+    renderKanbanBoard: function() {
+      const container = document.getElementById('kanban-board');
+      const tasks = appState.tasks;
+
+      const columns = [
+        { id: 'todo', title: '📋 A Fazer', tasks: tasks.filter(t => t.status === 'todo') },
+        { id: 'doing', title: '⚡ Em Andamento', tasks: tasks.filter(t => t.status === 'doing') },
+        { id: 'done', title: '✅ Concluído', tasks: tasks.filter(t => t.status === 'done') }
+      ];
+
+      container.innerHTML = `
+        <div class="kanban-board">
+          ${columns.map(col => `
+            <div class="kanban-column">
+              <div class="kanban-header">
+                <span>${col.title}</span>
+                <span class="kanban-count">${col.tasks.length}</span>
+              </div>
+              <div class="kanban-cards">
+                ${col.tasks.length === 0 ? '<p style="color: var(--text-tertiary); text-align: center; padding: 20px;">Nenhuma tarefa</p>' : ''}
+                ${col.tasks.map(task => `
+                  <div class="kanban-card">
+                    <div class="kanban-card-title">${utils.sanitize(task.title)}</div>
+                    <p style="font-size: 12px; color: var(--text-secondary); margin: 6px 0;">
+                      ${utils.sanitize(task.description || '')}
+                    </p>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    },
+
     renderCalendar: function(container) {
-      container.innerHTML = '<div><h1>Calendário</h1><p>Carregando...</p></div>';
+      container.innerHTML = `
+        <div>
+          <h1>Calendário</h1>
+          <p style="color: var(--text-secondary); margin-bottom: 24px;">Visualize suas rotinas e tarefas no calendário</p>
+          <div class="card">
+            <p style="text-align: center; padding: 40px; color: var(--text-secondary);">
+              Funcionalidade de calendário em desenvolvimento
+            </p>
+          </div>
+        </div>
+      `;
     },
+
     renderGoals: function(container) {
-      container.innerHTML = '<div><h1>Metas</h1><p>Carregando...</p></div>';
+      container.innerHTML = `
+        <div>
+          <div class="flex-between mb-lg">
+            <h1>Metas</h1>
+            <button class="btn btn-primary" onclick="goalHandlers.openCreateModal()">
+              <span class="material-icons">add</span>
+              Nova Meta
+            </button>
+          </div>
+
+          <div id="goals-list"></div>
+        </div>
+      `;
+
+      this.renderGoalsList();
     },
+
+    renderGoalsList: function() {
+      const container = document.getElementById('goals-list');
+      const goals = appState.goals;
+
+      if (goals.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons empty-state-icon">flag</span>
+            <h3 class="empty-state-title">Nenhuma meta cadastrada</h3>
+            <p class="empty-state-description">Defina suas primeiras metas!</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = `<div class="grid">${goals.map(goal => {
+        const progress = ((goal.currentValue || 0) / goal.targetValue) * 100;
+        const isComplete = progress >= 100;
+
+        return `
+          <div class="card ${isComplete ? 'glow-green' : 'glow-blue'}">
+            <div class="flex-between mb-md">
+              <h3>${utils.sanitize(goal.name)}</h3>
+              ${isComplete ? '<span class="badge badge-low">✅ Concluída</span>' : ''}
+            </div>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">${utils.sanitize(goal.description || '')}</p>
+
+            <div class="flex-between mb-sm">
+              <span style="font-size: 24px; font-weight: 700;">${goal.currentValue || 0} / ${goal.targetValue}</span>
+              <span style="font-size: 18px; font-weight: 600; color: var(--accent-blue);">${Math.round(progress)}%</span>
+            </div>
+
+            <div class="progress-bar">
+              <div class="progress-fill ${isComplete ? 'success' : ''}" style="width: ${Math.min(progress, 100)}%"></div>
+            </div>
+
+            ${goal.deadline ? `
+              <p style="font-size: 13px; color: var(--text-tertiary); margin-top: 12px;">
+                📅 Prazo: ${utils.formatDate(goal.deadline)}
+              </p>
+            ` : ''}
+          </div>
+        `;
+      }).join('')}</div>`;
+    },
+
     renderSettings: function(container) {
-      container.innerHTML = '<div><h1>Configurações</h1><p>Carregando...</p></div>';
+      container.innerHTML = `
+        <div>
+          <h1>Configurações</h1>
+
+          <div class="card">
+            <h3 class="mb-md">Aparência</h3>
+            <div class="form-group">
+              <label class="form-label">Tema</label>
+              <select class="form-select" id="theme-select">
+                <option value="light" ${appState.preferences.theme === 'light' ? 'selected' : ''}>Claro</option>
+                <option value="dark" ${appState.preferences.theme === 'dark' ? 'selected' : ''}>Escuro</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="card mt-md">
+            <h3 class="mb-md">Conta</h3>
+            <div class="flex-between">
+              <div>
+                <p style="color: var(--text-secondary); margin-bottom: 4px;">Usuário conectado</p>
+                <strong id="settings-user-email">${appState.userKey || 'Carregando...'}</strong>
+              </div>
+              <button class="btn btn-danger" onclick="authHandlers.logout()">Sair</button>
+            </div>
+          </div>
+
+          <div class="card mt-md">
+            <h3 class="mb-md">Dados</h3>
+            <button class="btn btn-secondary w-full" onclick="settingsHandlers.exportData()">
+              <span class="material-icons">download</span>
+              Exportar Dados
+            </button>
+          </div>
+        </div>
+      `;
+
+      const themeSelect = document.getElementById('theme-select');
+      if (themeSelect) {
+        themeSelect.addEventListener('change', (e) => {
+          theme.apply(e.target.value);
+          storage.save('theme', e.target.value);
+        });
+      }
     }
   };
 
@@ -503,13 +920,72 @@
   // HANDLERS
   // ============================================
 
-  const habitHandlers = {};
-  const taskHandlers = {};
-  const goalHandlers = {};
-  const settingsHandlers = {};
+  const habitHandlers = {
+    toggleToday: async function(habitId) {
+      const today = utils.getTodayISO();
+      const result = await api.toggleHabitCompletion(habitId, today);
+
+      if (result.ok) {
+        Object.assign(appState, result.data);
+        router.render(appState.currentView);
+        toast.success('Rotina atualizada!');
+      } else {
+        toast.error('Erro ao atualizar rotina: ' + result.error);
+      }
+    },
+
+    openCreateModal: function() {
+      toast.info('Funcionalidade em desenvolvimento');
+    }
+  };
+
+  const taskHandlers = {
+    setStatus: async function(taskId, status) {
+      const result = await api.setTaskStatus(taskId, status);
+
+      if (result.ok) {
+        Object.assign(appState, result.data);
+        router.render(appState.currentView);
+        toast.success('Tarefa atualizada!');
+      } else {
+        toast.error('Erro ao atualizar tarefa: ' + result.error);
+      }
+    },
+
+    openCreateModal: function() {
+      toast.info('Funcionalidade em desenvolvimento');
+    },
+
+    openEditModal: function(taskId) {
+      toast.info('Funcionalidade em desenvolvimento');
+    }
+  };
+
+  const goalHandlers = {
+    openCreateModal: function() {
+      toast.info('Funcionalidade em desenvolvimento');
+    }
+  };
+
+  const settingsHandlers = {
+    exportData: async function() {
+      toast.info('Exportando dados...');
+      const result = await api.exportUserData('json');
+
+      if (result.ok) {
+        toast.success('Dados exportados com sucesso!');
+      } else {
+        toast.error('Erro ao exportar dados: ' + result.error);
+      }
+    }
+  };
+
   const authHandlers = {
     logout: function() {
       if (confirm('Tem certeza que deseja sair?')) {
+        storage.remove('appCache');
+        storage.remove('theme');
+        storage.remove('preferences');
         window.location.reload();
       }
     }
