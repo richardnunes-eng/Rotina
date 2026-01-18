@@ -1770,7 +1770,110 @@ function getLastSyncStatus() {
 }
 
 /**
- * Cria ou atualiza trigger automático de sincronização
+ * Lista tarefas do ClickUp sincronizadas no sheet CLICKUP_TASKS
+ */
+function listClickUpTasks(options) {
+  return safeExecute('listClickUpTasks', () => {
+    const opts = options || {};
+    const query = String(opts.query || '').trim().toLowerCase();
+    const statusFilter = String(opts.status || 'all').trim().toLowerCase();
+    const page = Math.max(1, parseInt(opts.page, 10) || 1);
+    const pageSize = Math.max(1, parseInt(opts.pageSize, 10) || 25);
+    const includeForaDaView = !!opts.includeForaDaView;
+
+    const ss = getOrCreateSpreadsheet();
+    const sheet = ss.getSheetByName('CLICKUP_TASKS');
+    if (!sheet) {
+      return { ok: false, error: 'Sheet CLICKUP_TASKS nao encontrada. Execute a sincronizacao do ClickUp.' };
+    }
+
+    if (sheet.getLastRow() <= 1) {
+      return { ok: true, data: { items: [], total: 0, page: page, pageSize: pageSize } };
+    }
+
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+
+    function isTrue(value) {
+      return value === true || String(value).toLowerCase() === 'true';
+    }
+
+    function matchesStatus(rowStatus) {
+      if (!statusFilter || statusFilter === 'all') return true;
+      const status = String(rowStatus || '').toLowerCase();
+      if (!status) return false;
+      if (statusFilter === 'open') {
+        return !(status.includes('done') || status.includes('closed') || status.includes('complete'));
+      }
+      if (statusFilter === 'doing') {
+        return status.includes('doing') || status.includes('progress');
+      }
+      if (statusFilter === 'done') {
+        return status.includes('done') || status.includes('closed') || status.includes('complete');
+      }
+      return status === statusFilter;
+    }
+
+    const filtered = [];
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const record = {};
+      for (let j = 0; j < headers.length; j++) {
+        record[headers[j]] = row[j];
+      }
+
+      if (!includeForaDaView && isTrue(record.fora_da_view)) {
+        continue;
+      }
+
+      if (!matchesStatus(record.status)) {
+        continue;
+      }
+
+      if (query) {
+        const haystack = [
+          record.name,
+          record.responsavel_principal,
+          record.status,
+          record.priority,
+          record.assignees
+        ].join(' ').toLowerCase();
+        if (!haystack.includes(query)) {
+          continue;
+        }
+      }
+
+      filtered.push(record);
+    }
+
+    filtered.sort((a, b) => {
+      const aVal = parseInt(a.date_updated, 10) || Date.parse(a.date_updated) || 0;
+      const bVal = parseInt(b.date_updated, 10) || Date.parse(b.date_updated) || 0;
+      return bVal - aVal;
+    });
+
+    const total = filtered.length;
+    const start = (page - 1) * pageSize;
+    const paged = filtered.slice(start, start + pageSize);
+
+    const items = paged.map(record => ({
+      task_id: record.task_id,
+      task_url: record.task_url,
+      name: record.name,
+      status: record.status,
+      priority: record.priority,
+      responsavel_principal: record.responsavel_principal,
+      due_date: record.due_date,
+      date_updated: record.date_updated,
+      fora_da_view: record.fora_da_view
+    }));
+
+    return { ok: true, data: { items: items, total: total, page: page, pageSize: pageSize } };
+  });
+}
+
+/**
+ * Cria ou atualiza trigger automÇ­tico de sincronizaÇõÇœo
  */
 function createOrUpdateClickUpTrigger() {
   try {
@@ -1818,3 +1921,4 @@ function removeClickUpTrigger() {
     return { ok: false, error: error.toString() };
   }
 }
+
