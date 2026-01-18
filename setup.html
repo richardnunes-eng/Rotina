@@ -28,7 +28,11 @@
       const status = document.getElementById('deployment-id-status');
 
       function isFramed() {
-        return window.top !== window.self;
+        try {
+          return window.top !== window.self;
+        } catch (err) {
+          return true;
+        }
       }
 
       function openInNewTab(url, statusEl) {
@@ -80,8 +84,20 @@
             return;
           }
           try {
-            await navigator.clipboard.writeText(url);
-            status.textContent = 'Link copiado.';
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              await navigator.clipboard.writeText(url);
+              status.textContent = 'Link copiado.';
+              return;
+            }
+            const input = card.querySelector('#webapp-url-input');
+            if (input) {
+              input.focus();
+              input.select();
+              const copied = document.execCommand('copy');
+              status.textContent = copied ? 'Link copiado.' : 'Falha ao copiar. Copie manualmente.';
+            } else {
+              status.textContent = 'Falha ao copiar. Copie manualmente do campo acima.';
+            }
           } catch (err) {
             console.error('Falha ao copiar link:', err);
             status.textContent = 'Falha ao copiar. Copie manualmente do campo acima.';

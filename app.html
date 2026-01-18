@@ -150,7 +150,11 @@ window.callServer = callServer;
       return (appConfig.webAppUrl || '').trim();
     },
     isFramed: function() {
-      return window.top !== window.self;
+      try {
+        return window.top !== window.self;
+      } catch (err) {
+        return true;
+      }
     },
     openInNewTab: function(url, statusEl) {
       let opened = null;
@@ -257,8 +261,20 @@ window.callServer = callServer;
           return;
         }
         try {
-          await navigator.clipboard.writeText(url);
-          status.textContent = 'Link copiado.';
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(url);
+            status.textContent = 'Link copiado.';
+            return;
+          }
+          const input = loading.querySelector('#webapp-url-input');
+          if (input) {
+            input.focus();
+            input.select();
+            const copied = document.execCommand('copy');
+            status.textContent = copied ? 'Link copiado.' : 'Falha ao copiar. Copie manualmente.';
+          } else {
+            status.textContent = 'Falha ao copiar. Copie manualmente do campo acima.';
+          }
         } catch (err) {
           console.error('Falha ao copiar link:', err);
           status.textContent = 'Falha ao copiar. Copie manualmente do campo acima.';
@@ -2253,7 +2269,7 @@ window.callServer = callServer;
     }
 
     if (frameGuard.isFramed()) {
-      frameGuard.redirectOutOfFrame();
+      frameGuard.showOutOfFrameGate();
       return;
     }
 
