@@ -2119,21 +2119,25 @@ window.callServer = callServer;
     const loading = document.getElementById('loading-screen');
     if (!loading) return;
 
-    loading.innerHTML = `<div style="max-width: 520px; text-align: center;">
-      <h2>Entrar ou criar conta</h2>
-      <p>Use seu e-mail e senha para acessar o app.</p>
-      <div style="text-align: left; max-width: 360px; margin: 0 auto;">
-        <label style="display: block; margin-top: 12px;">E-mail</label>
-        <input id="auth-email" type="email" style="width: 100%; padding: 10px;" placeholder="voce@exemplo.com">
-        <label style="display: block; margin-top: 12px;">Senha</label>
-        <input id="auth-password" type="password" style="width: 100%; padding: 10px;" placeholder="Senha">
+    loading.innerHTML = `
+      <div class="card" style="max-width: 480px; margin: 0 auto; text-align: left;">
+        <h2 class="mb-sm">Entrar ou criar conta</h2>
+        <p class="text-muted mb-lg">Use seu e-mail e senha para acessar o app.</p>
+        <div class="form-group">
+          <label class="form-label">E-mail</label>
+          <input id="auth-email" type="email" class="form-input" placeholder="voce@exemplo.com">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Senha</label>
+          <input id="auth-password" type="password" class="form-input" placeholder="Senha">
+        </div>
+        <div class="modal-footer" style="justify-content: flex-start;">
+          <button id="auth-login" class="btn btn-primary">Entrar</button>
+          <button id="auth-register" class="btn btn-secondary">Cadastrar</button>
+        </div>
+        <p id="auth-status" style="margin-top: 12px; color: #d32f2f;"></p>
       </div>
-      <div style="display: flex; gap: 12px; justify-content: center; margin: 16px 0;">
-        <button id="auth-login" style="padding: 10px 16px;">Entrar</button>
-        <button id="auth-register" style="padding: 10px 16px;">Cadastrar</button>
-      </div>
-      <p id="auth-status" style="margin-top: 12px; color: #d32f2f;"></p>
-    </div>`;
+    `;
     loading.style.display = 'flex';
 
     const emailEl = loading.querySelector('#auth-email');
@@ -2203,59 +2207,19 @@ window.callServer = callServer;
       return null;
     }
   }
-
-  function showAuthUserGate() {
-    const loading = document.getElementById('loading-screen');
-    if (!loading) return;
-
-    loading.innerHTML = `<div style="max-width: 560px; text-align: center;">
-      <h2>Escolha a conta Google</h2>
-      <p>Selecione a conta certa para evitar erro de varias contas.</p>
-      <div style="display: flex; gap: 12px; justify-content: center; margin: 16px 0;">
-        <button data-authuser="0" class="authuser-btn">Conta 0</button>
-        <button data-authuser="1" class="authuser-btn">Conta 1</button>
-        <button data-authuser="2" class="authuser-btn">Conta 2</button>
-      </div>
-      <div style="margin: 12px 0;">
-        <input id="authuser-input" type="number" min="0" step="1" placeholder="Outro indice (ex: 3)" style="padding: 10px; width: 220px;">
-        <button id="authuser-apply" style="padding: 10px 16px;">Usar</button>
-      </div>
-      <p id="authuser-status" style="margin-top: 12px; color: #d32f2f;"></p>
-    </div>`;
-    loading.style.display = 'flex';
-
-    const status = loading.querySelector('#authuser-status');
-    const buttons = loading.querySelectorAll('.authuser-btn');
-    const input = loading.querySelector('#authuser-input');
-    const applyBtn = loading.querySelector('#authuser-apply');
-
-    function navigateWithAuthUser(value) {
-      const authUser = String(value).trim();
-      if (!/^\d+$/.test(authUser)) {
-        status.textContent = 'Informe um indice valido.';
-        return;
-      }
-      const url = new URL(window.location.href);
-      url.searchParams.set('authuser', authUser);
-      window.location.href = url.toString();
-    }
-
-    buttons.forEach(btn => {
-      btn.addEventListener('click', () => navigateWithAuthUser(btn.dataset.authuser));
-    });
-
-    applyBtn.addEventListener('click', () => navigateWithAuthUser(input.value));
-  }
   async function init() {
+    let blocked = false;
     try {
       if (!getAuthUserParam()) {
         showAuthUserGate();
+        blocked = true;
         return;
       }
 
       const authUser = getStoredAuthUser();
       if (!authUser) {
         showAuthUserGate();
+        blocked = true;
         return;
       }
 
@@ -2336,6 +2300,9 @@ window.callServer = callServer;
         appState.journals = [];
       }
     } finally {
+      if (blocked) {
+        return;
+      }
       // Esconder loading e mostrar app
       const loadingScreen = document.getElementById('loading-screen');
       const appContainer = document.getElementById('app');
