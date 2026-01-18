@@ -1,6 +1,6 @@
 // ============================================
 // ROUTINE APP - Google Apps Script Backend
-// VERSÃO 2.0 - Com Calendar Sync e Recorrência
+// VERSÃƒO 2.0 - Com Calendar Sync e RecorrÃªncia
 // ============================================
 
 
@@ -28,7 +28,7 @@ function safeExecute(fnName, handler, context) {
     if (result === undefined || result === null) {
       return {
         ok: false,
-        error: `Função ${fnName} não retornou valor válido`,
+        error: `FunÃ§Ã£o ${fnName} nÃ£o retornou valor vÃ¡lido`,
         meta: { fnName, duration: new Date() - startTime, timestamp: new Date().toISOString() }
       };
     }
@@ -50,7 +50,7 @@ function safeExecute(fnName, handler, context) {
     };
     
   } catch (error) {
-    log(`[${fnName}] EXCEÇÃO`, error.toString());
+    log(`[${fnName}] EXCEÃ‡ÃƒO`, error.toString());
     return {
       ok: false,
       error: error.toString(),
@@ -253,7 +253,7 @@ function getOrCreateSpreadsheet() {
       ss = SpreadsheetApp.openById(SPREADSHEET_ID);
       return ss;
     } catch (e) {
-      // ID inválido, criar nova planilha
+      // ID invÃ¡lido, criar nova planilha
     }
   }
   
@@ -294,7 +294,7 @@ function getUserKey() {
     const email = Session.getActiveUser().getEmail();
     if (email) return email;
   } catch (e) {
-    // Sessão anônima
+    // SessÃ£o anÃ´nima
   }
   return 'anonymous_' + Utilities.getUuid();
 }
@@ -408,14 +408,14 @@ function generateRecurringTasks(userKey, options) {
       const futureDate = new Date();
       futureDate.setDate(futureDate.getDate() + daysAhead);
       
-      // Gerar instâncias para os próximos dias
+      // Gerar instÃ¢ncias para os prÃ³ximos dias
       for (let d = new Date(today); d <= futureDate; d.setDate(d.getDate() + 1)) {
         if (d < startDate) continue;
         if (endDate && d > endDate) break;
         
         const dateStr = d.toISOString().split('T')[0];
         
-        // Verificar se já existe instância para este dia
+        // Verificar se jÃ¡ existe instÃ¢ncia para este dia
         const existing = findRecords('TASKS', { 
           userKey: userKey, 
           templateTaskId: template.id, 
@@ -423,7 +423,7 @@ function generateRecurringTasks(userKey, options) {
         });
         
         if (existing.length === 0) {
-          // Criar nova instância
+          // Criar nova instÃ¢ncia
           const instance = {
             id: Utilities.getUuid(),
             userKey: userKey,
@@ -465,29 +465,29 @@ function generateRecurringTasks(userKey, options) {
 // ============================================
 
 function doGet() {
-  // Verificar se o usuário está autenticado
+  // Verificar se o usuÃ¡rio estÃ¡ autenticado
   let userEmail = '';
 
   try {
     userEmail = Session.getActiveUser().getEmail();
   } catch (e) {
-    // Falha ao obter email - não autenticado
-    log('Erro ao obter email do usuário', e.toString());
+    // Falha ao obter email - nÃ£o autenticado
+    log('Erro ao obter email do usuÃ¡rio', e.toString());
   }
 
-  // Se não houver email, significa que não está autenticado
-  // Retornar página bootstrap que força login padrão do Google
+  // Se nÃ£o houver email, significa que nÃ£o estÃ¡ autenticado
+  // Retornar pÃ¡gina bootstrap que forÃ§a login padrÃ£o do Google
   if (!userEmail) {
-    log('Usuário não autenticado, redirecionando para bootstrap');
+    log('UsuÃ¡rio nÃ£o autenticado, redirecionando para bootstrap');
     return HtmlService.createTemplateFromFile('bootstrap')
       .evaluate()
-      .setTitle('THX Ops - Autenticação')
+      .setTitle('THX Ops - AutenticaÃ§Ã£o')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
 
   // Se autenticado, mostrar o app normal
-  log('Usuário autenticado', userEmail);
+  log('UsuÃ¡rio autenticado', userEmail);
   return HtmlService.createTemplateFromFile('index')
     .evaluate()
     .setTitle('THX Ops')
@@ -503,18 +503,18 @@ function getSessionInfo() {
   try {
     let email = null;
 
-    // Tentar obter email do usuário ativo
+    // Tentar obter email do usuÃ¡rio ativo
     try {
       email = Session.getActiveUser().getEmail();
 
-      // Validar que o email é realmente válido (não vazio)
+      // Validar que o email Ã© realmente vÃ¡lido (nÃ£o vazio)
       if (!email || email.trim() === '') {
         email = null;
       }
     } catch (e) {
       log('Erro ao obter Session.getActiveUser().getEmail()', e.toString());
 
-      // Se falhar, tentar método alternativo
+      // Se falhar, tentar mÃ©todo alternativo
       try {
         email = Session.getEffectiveUser().getEmail();
 
@@ -523,7 +523,7 @@ function getSessionInfo() {
         }
       } catch (e2) {
         log('Erro ao obter Session.getEffectiveUser().getEmail()', e2.toString());
-        // Ambos os métodos falharam
+        // Ambos os mÃ©todos falharam
       }
     }
 
@@ -548,10 +548,10 @@ function getSessionInfo() {
 
 function initApp(providedUserKey) {
   return safeExecute('initApp', () => {
-    log('=== INIT APP COMEÇANDO ===');
+    log('=== INIT APP COMEÃ‡ANDO ===');
     const userKey = providedUserKey || getUserKey();
     
-    // Criar usuário se não existir
+    // Criar usuÃ¡rio se nÃ£o existir
     const existingUser = findRecords('USERS', { userKey: userKey });
     if (existingUser.length === 0) {
       createRecord('USERS', {
@@ -565,10 +565,10 @@ function initApp(providedUserKey) {
     try {
       generateRecurringTasks(userKey, { daysAhead: 14 });
     } catch (e) {
-      Logger.log('Erro ao gerar recorrências: ' + e.toString());
+      Logger.log('Erro ao gerar recorrÃªncias: ' + e.toString());
     }
     
-    // Buscar todos os dados do usuário
+    // Buscar todos os dados do usuÃ¡rio
     const habits = findRecords('HABITS', { userKey: userKey });
     const habitLogs = findRecords('HABIT_LOG', { userKey: userKey });
     const tasks = findRecords('TASKS', { userKey: userKey });
@@ -591,7 +591,7 @@ function initApp(providedUserKey) {
       }
     };
     
-    log('=== INIT APP CONCLUÍDO ===');
+    log('=== INIT APP CONCLUÃDO ===');
     return response;
   }, { userKey: providedUserKey });
 }
@@ -731,7 +731,7 @@ function createTask(userKey, taskData) {
     
     createRecord('TASKS', task);
     
-    // Se for recorrente, gerar instâncias
+    // Se for recorrente, gerar instÃ¢ncias
     if (task.isRecurring) {
       generateRecurringTasks(userKey, { daysAhead: 30 });
     }
@@ -769,7 +769,7 @@ function updateTask(userKey, taskId, updates) {
     
     updateRecord('TASKS', taskId, updateData);
     
-    // Se alterou recorrência, regerar instâncias
+    // Se alterou recorrÃªncia, regerar instÃ¢ncias
     if (updates.isRecurring || updates.recurrenceDays || updates.recurrenceTime) {
       generateRecurringTasks(userKey, { daysAhead: 30 });
     }
@@ -792,7 +792,7 @@ function deleteTask(userKey, taskId) {
     const items = findRecords('TASK_CHECKLIST', { taskId: taskId, userKey: userKey });
     items.forEach(item => deleteRecord('TASK_CHECKLIST', item.id));
     
-    // Se for template, deletar instâncias
+    // Se for template, deletar instÃ¢ncias
     const instances = findRecords('TASKS', { templateTaskId: taskId, userKey: userKey });
     instances.forEach(inst => deleteRecord('TASKS', inst.id));
     
@@ -1035,9 +1035,13 @@ function exportUserData(userKey, format) {
       
       Object.keys(data.data).forEach(key => {
         if (Array.isArray(data.data[key]) && data.data[key].length > 0) {
-          csv += `\n\n=== ${key.toUpperCase()} ===\n`;
+          csv += `
+
+=== ${key.toUpperCase()} ===
+`;
           const headers = Object.keys(data.data[key][0]);
-          csv += headers.join(',') + '\n';
+          csv += headers.join(',') + '
+';
           
           data.data[key].forEach(row => {
             const values = headers.map(h => {
@@ -1047,7 +1051,8 @@ function exportUserData(userKey, format) {
               }
               return val;
             });
-            csv += values.join(',') + '\n';
+            csv += values.join(',') + '
+';
           });
         }
       });
@@ -1065,20 +1070,23 @@ function exportUserData(userKey, format) {
 // CLICKUP INTEGRATION
 // ============================================
 
-// Constantes de configuração
+// Constantes de configuraÃ§Ã£o
 const CLICKUP_VIEW_ID = '6-901304433414-1';
+const CLICKUP_LIST_ID = '90131374592';
 const SYNC_INTERVAL_MIN = 10;
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
+const CLICKUP_PAGE_SIZE = 100;
+const MAX_VIEW_PAGES = 200;
 
 /**
- * Obtém o token do ClickUp das Script Properties
+ * ObtÃ©m o token do ClickUp das Script Properties
  * NUNCA retornar token para o frontend - apenas uso interno
  */
 function getClickUpToken() {
   const token = PropertiesService.getScriptProperties().getProperty('CLICKUP_API_KEY');
   if (!token) {
-    throw new Error('Token do ClickUp não configurado. Configure CLICKUP_API_KEY nas Script Properties.');
+    throw new Error('Token do ClickUp nÃ£o configurado. Configure CLICKUP_API_KEY nas Script Properties.');
   }
   return token;
 }
@@ -1089,7 +1097,7 @@ function getClickUpToken() {
  */
 function setClickUpToken(token) {
   if (!token || token.trim() === '') {
-    throw new Error('Token inválido');
+    throw new Error('Token invÃ¡lido');
   }
   PropertiesService.getScriptProperties().setProperty('CLICKUP_API_KEY', token.trim());
   log('Token do ClickUp configurado com sucesso');
@@ -1097,8 +1105,8 @@ function setClickUpToken(token) {
 }
 
 /**
- * EXECUTAR UMA VEZ: Inicializa a integração com ClickUp
- * Define o token e cria as estruturas necessárias
+ * EXECUTAR UMA VEZ: Inicializa a integraÃ§Ã£o com ClickUp
+ * Define o token e cria as estruturas necessÃ¡rias
  */
 function initializeClickUpIntegration() {
   try {
@@ -1106,25 +1114,25 @@ function initializeClickUpIntegration() {
     const token = 'pk_87986690_9X1MC60UE18B1X9PEJFRMEFTT6GNHHFS';
     setClickUpToken(token);
 
-    // 2. Criar sheets necessárias
+    // 2. Criar sheets necessÃ¡rias
     ensureClickUpSheets();
 
-    // 3. Criar trigger automático
+    // 3. Criar trigger automÃ¡tico
     createOrUpdateClickUpTrigger();
 
-    log('✅ Integração ClickUp inicializada com sucesso!');
+    log('âœ… IntegraÃ§Ã£o ClickUp inicializada com sucesso!');
 
     return {
       ok: true,
-      message: 'Integração configurada! Token salvo, sheets criadas e trigger ativado.',
+      message: 'IntegraÃ§Ã£o configurada! Token salvo, sheets criadas e trigger ativado.',
       nextSteps: [
-        '1. Execute syncClickUpNow() para fazer a primeira sincronização',
+        '1. Execute syncClickUpNow() para fazer a primeira sincronizaÃ§Ã£o',
         '2. Verifique a aba CLICKUP_TASKS no Google Sheets',
-        '3. Configure mapeamento de usuários na aba MAPEAMENTO_USUARIOS (opcional)'
+        '3. Configure mapeamento de usuÃ¡rios na aba MAPEAMENTO_USUARIOS (opcional)'
       ]
     };
   } catch (error) {
-    log('❌ Erro ao inicializar integração', error.toString());
+    log('âŒ Erro ao inicializar integraÃ§Ã£o', error.toString());
     return { ok: false, error: error.toString() };
   }
 }
@@ -1198,7 +1206,7 @@ function clickupRequest(method, path, params, body) {
         }
       }
 
-      // Client errors ou outras respostas - não retry
+      // Client errors ou outras respostas - nÃ£o retry
       let errorMsg = `ClickUp API erro ${statusCode}`;
       try {
         const errorData = JSON.parse(responseText);
@@ -1210,7 +1218,7 @@ function clickupRequest(method, path, params, body) {
       return { ok: false, error: errorMsg, statusCode: statusCode };
 
     } catch (e) {
-      log(`Exceção na requisição ClickUp (tentativa ${attempt}): ${e.toString()}`);
+      log(`ExceÃ§Ã£o na requisiÃ§Ã£o ClickUp (tentativa ${attempt}): ${e.toString()}`);
       if (attempt < MAX_RETRIES) {
         Utilities.sleep(RETRY_DELAY_MS * attempt);
         continue;
@@ -1219,11 +1227,11 @@ function clickupRequest(method, path, params, body) {
     }
   }
 
-  return { ok: false, error: 'Máximo de tentativas excedido' };
+  return { ok: false, error: 'MÃ¡ximo de tentativas excedido' };
 }
 
 /**
- * Busca tarefas da VIEW específica do ClickUp com paginação
+ * Busca tarefas da VIEW especÃ­fica do ClickUp com paginaÃ§Ã£o
  */
 function getClickUpViewTasks(viewId, includeClosed) {
   viewId = viewId || CLICKUP_VIEW_ID;
@@ -1232,15 +1240,17 @@ function getClickUpViewTasks(viewId, includeClosed) {
   const allTasks = [];
   let page = 0;
   let hasMore = true;
+  let pagesFetched = 0;
 
   while (hasMore) {
     const params = {
       page: page,
       include_closed: includeClosed,
-      subtasks: true
+      subtasks: true,
+      limit: CLICKUP_PAGE_SIZE
     };
 
-    log(`Buscando página ${page} da view ${viewId}`);
+    log(`Buscando pagina ${page} da view ${viewId}`);
     const result = clickupRequest('GET', `/view/${viewId}/task`, params);
 
     if (!result.ok) {
@@ -1249,21 +1259,34 @@ function getClickUpViewTasks(viewId, includeClosed) {
     }
 
     const tasks = result.data.tasks || [];
+    const lastPage = result.data.last_page;
+    const nextPage = result.data.next_page;
+    const total = result.data.total;
     allTasks.push(...tasks);
 
-    log(`Página ${page}: ${tasks.length} tarefas recebidas`);
+    log(`Pagina ${page}: ${tasks.length} tarefas recebidas`, {
+      total: total,
+      nextPage: nextPage,
+      lastPage: lastPage
+    });
 
-    // Verificar se há mais páginas
-    // A API do ClickUp retorna array vazio quando não há mais tarefas
-    if (tasks.length === 0) {
+    // Verificar se ha mais paginas
+    // A API do ClickUp retorna array vazio quando nao ha mais tarefas
+    if (lastPage === true) {
+      hasMore = false;
+    } else if (nextPage !== undefined && nextPage !== null) {
+      page = nextPage;
+    } else if (tasks.length === 0) {
       hasMore = false;
     } else {
       page++;
-      // Proteção contra loop infinito
-      if (page > 100) {
-        log('AVISO: Limite de 100 páginas atingido, interrompendo');
-        hasMore = false;
-      }
+    }
+
+    pagesFetched++;
+    // Protecao contra loop infinito
+    if (pagesFetched >= MAX_VIEW_PAGES) {
+      log(`AVISO: Limite de ${MAX_VIEW_PAGES} paginas atingido, interrompendo`);
+      hasMore = false;
     }
   }
 
@@ -1272,7 +1295,59 @@ function getClickUpViewTasks(viewId, includeClosed) {
 }
 
 /**
- * Garante que as abas necessárias existam
+ * Busca tarefas de uma LISTA do ClickUp com paginacao
+ */
+function getClickUpListTasks(listId, includeClosed) {
+  listId = listId || CLICKUP_LIST_ID;
+  includeClosed = includeClosed !== undefined ? includeClosed : true;
+
+  const allTasks = [];
+  let page = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const params = {
+      archived: false,
+      page: page,
+      include_closed: includeClosed,
+      subtasks: true,
+      limit: CLICKUP_PAGE_SIZE
+    };
+
+    log(`Buscando pagina ${page} da lista ${listId}`);
+    const result = clickupRequest('GET', `/list/${listId}/task`, params);
+
+    if (!result.ok) {
+      logSyncError('getClickUpListTasks', 'GET', `/list/${listId}/task`, result.statusCode, result.error, page);
+      return { ok: false, error: result.error, page: page };
+    }
+
+    const tasks = result.data.tasks || [];
+    const total = result.data.total;
+    allTasks.push(...tasks);
+
+    log(`Pagina ${page}: ${tasks.length} tarefas recebidas`, {
+      total: total
+    });
+
+    if (tasks.length === 0) {
+      hasMore = false;
+    } else if (tasks.length < CLICKUP_PAGE_SIZE) {
+      hasMore = false;
+    } else {
+      page++;
+    }
+
+    if (hasMore) {
+      Utilities.sleep(50);
+    }
+  }
+
+  log(`Total de tarefas obtidas: ${allTasks.length}`);
+  return { ok: true, tasks: allTasks, totalPages: page };
+}
+/**
+ * Garante que as abas necessÃ¡rias existam
  */
 function ensureClickUpSheets() {
   const ss = getOrCreateSpreadsheet();
@@ -1345,7 +1420,7 @@ function ensureClickUpSheets() {
 }
 
 /**
- * Registra erro de sincronização
+ * Registra erro de sincronizaÃ§Ã£o
  */
 function logSyncError(functionName, method, endpoint, statusCode, message, page) {
   try {
@@ -1365,7 +1440,7 @@ function logSyncError(functionName, method, endpoint, statusCode, message, page)
 
     logSheet.appendRow(row);
 
-    // Manter apenas últimos 500 logs
+    // Manter apenas Ãºltimos 500 logs
     if (logSheet.getLastRow() > 501) {
       logSheet.deleteRows(2, logSheet.getLastRow() - 501);
     }
@@ -1375,7 +1450,7 @@ function logSyncError(functionName, method, endpoint, statusCode, message, page)
 }
 
 /**
- * Busca mapeamento de usuário ClickUp para interno
+ * Busca mapeamento de usuÃ¡rio ClickUp para interno
  */
 function getUserMapping(clickupUserId, clickupUsername) {
   try {
@@ -1404,7 +1479,7 @@ function getUserMapping(clickupUserId, clickupUsername) {
       }
     }
   } catch (e) {
-    log('Erro ao buscar mapeamento de usuário', e.toString());
+    log('Erro ao buscar mapeamento de usuÃ¡rio', e.toString());
   }
   return null;
 }
@@ -1420,9 +1495,11 @@ function syncClickUpViewToSheet() {
     const sheets = ensureClickUpSheets();
     const tasksSheet = sheets.tasksSheet;
 
-    // Buscar tarefas da VIEW
+    // Buscar tarefas da LISTA (fallback para VIEW)
     log('Iniciando busca de tarefas do ClickUp');
-    const result = getClickUpViewTasks(CLICKUP_VIEW_ID, true);
+    const result = CLICKUP_LIST_ID
+      ? getClickUpListTasks(CLICKUP_LIST_ID, true)
+      : getClickUpViewTasks(CLICKUP_VIEW_ID, true);
 
     if (!result.ok) {
       return { ok: false, error: result.error };
@@ -1517,7 +1594,7 @@ function syncClickUpViewToSheet() {
       upserted++;
     }
 
-    // Marcar tarefas que saíram da VIEW
+    // Marcar tarefas que saÃ­ram da VIEW
     let outOfView = 0;
     for (const existing of existingData) {
       if (!viewTaskIds.has(existing.taskId)) {
@@ -1539,7 +1616,7 @@ function syncClickUpViewToSheet() {
 
     const duration = new Date() - startTime;
 
-    log('Sincronização com Sheet concluída', {
+    log('SincronizaÃ§Ã£o com Sheet concluÃ­da', {
       fetched: tasks.length,
       upserted: upserted,
       updated: updated,
@@ -1580,7 +1657,7 @@ function syncClickUpToRoutine() {
     const data = clickupSheet.getDataRange().getValues();
     const headers = data[0];
 
-    // Índices das colunas
+    // Ãndices das colunas
     const taskIdIdx = headers.indexOf('task_id');
     const nameIdx = headers.indexOf('name');
     const statusIdx = headers.indexOf('status');
@@ -1627,7 +1704,7 @@ function syncClickUpToRoutine() {
       }
 
       try {
-        // Buscar se já existe tarefa interna vinculada
+        // Buscar se jÃ¡ existe tarefa interna vinculada
         const linkedTask = existingByClickUpId[taskId];
 
         // Determinar status interno baseado no status do ClickUp
@@ -1647,7 +1724,7 @@ function syncClickUpToRoutine() {
           else if (p === 'low') internalPriority = 'low';
         }
 
-        // Buscar mapeamento de usuário
+        // Buscar mapeamento de usuÃ¡rio
         let userKey = 'CLICKUP_SYNC';
         if (isEmailLike(responsavelEmail)) {
           userKey = responsavelEmail;
@@ -1662,7 +1739,9 @@ function syncClickUpToRoutine() {
 
         const taskData = {
           title: name,
-          description: `[ClickUp:${taskId}]\n${name}\nURL: Ver no ClickUp`,
+          description: `[ClickUp:${taskId}]
+${name}
+URL: Ver no ClickUp`,
           priority: internalPriority,
           dueDate: dueDate ? new Date(parseInt(dueDate)).toISOString().split('T')[0] : '',
           status: internalStatus,
@@ -1730,7 +1809,7 @@ function syncClickUpToRoutine() {
 }
 
 /**
- * Orquestra toda a sincronização
+ * Orquestra toda a sincronizaÃ§Ã£o
  */
 function syncAll() {
   const startTime = new Date();
@@ -1762,7 +1841,7 @@ function syncAll() {
 
     log('=== SYNC CLICKUP COMPLETO ===', result);
 
-    // Salvar status do último sync
+    // Salvar status do Ãºltimo sync
     PropertiesService.getScriptProperties().setProperty('LAST_CLICKUP_SYNC', JSON.stringify({
       timestamp: result.timestamp,
       success: true,
@@ -1790,7 +1869,7 @@ function syncAll() {
 }
 
 /**
- * Função exposta para o frontend - Sincronização manual
+ * FunÃ§Ã£o exposta para o frontend - SincronizaÃ§Ã£o manual
  */
 function syncClickUpNow() {
   return safeExecute('syncClickUpNow', () => {
@@ -1799,7 +1878,7 @@ function syncClickUpNow() {
 }
 
 /**
- * Obtém status da última sincronização
+ * ObtÃ©m status da Ãºltima sincronizaÃ§Ã£o
  */
 function getLastSyncStatus() {
   try {
@@ -1961,7 +2040,7 @@ function listClickUpTasks(options) {
 }
 
 /**
- * Cria ou atualiza trigger automÇ­tico de sincronizaÇõÇœo
+ * Cria ou atualiza trigger automÃ‡Â­tico de sincronizaÃ‡ÃµÃ‡Å“o
  */
 function createOrUpdateClickUpTrigger() {
   try {
@@ -1979,7 +2058,7 @@ function createOrUpdateClickUpTrigger() {
       .everyMinutes(SYNC_INTERVAL_MIN)
       .create();
 
-    log(`Trigger criado: sincronização a cada ${SYNC_INTERVAL_MIN} minutos`);
+    log(`Trigger criado: sincronizaÃ§Ã£o a cada ${SYNC_INTERVAL_MIN} minutos`);
 
     return { ok: true, message: `Trigger criado com sucesso (${SYNC_INTERVAL_MIN} min)` };
   } catch (error) {
@@ -1989,7 +2068,7 @@ function createOrUpdateClickUpTrigger() {
 }
 
 /**
- * Remove trigger automático
+ * Remove trigger automÃ¡tico
  */
 function removeClickUpTrigger() {
   try {
