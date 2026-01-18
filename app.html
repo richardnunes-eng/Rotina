@@ -1881,6 +1881,7 @@
       this.setLoadingIndicator('Carregando tarefas...');
 
       const result = await api.listClickUpTasks({
+        userKey: appState.userKey,
         query: this.state.query,
         status: this.state.status,
         page: this.state.page,

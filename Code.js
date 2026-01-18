@@ -1422,7 +1422,7 @@ function syncClickUpViewToSheet() {
 
     // Buscar tarefas da VIEW
     log('Iniciando busca de tarefas do ClickUp');
-    const result = getClickUpViewTasks();
+    const result = getClickUpViewTasks(CLICKUP_VIEW_ID, true);
 
     if (!result.ok) {
       return { ok: false, error: result.error };
@@ -1840,8 +1840,35 @@ function listClickUpTasks(options) {
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
 
+    let currentUserEmail = String(opts.userKey || '').trim().toLowerCase();
+    if (!currentUserEmail) {
+      try {
+        currentUserEmail = Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail();
+      } catch (e) {}
+      currentUserEmail = String(currentUserEmail || '').trim().toLowerCase();
+    }
+
+    const mappingByUsername = {};
+    const mappingSheet = ss.getSheetByName('MAPEAMENTO_USUARIOS');
+    if (mappingSheet && mappingSheet.getLastRow() > 1) {
+      const mappingData = mappingSheet.getDataRange().getValues();
+      for (let i = 1; i < mappingData.length; i++) {
+        const row = mappingData[i];
+        const clickupUsername = String(row[1] || '').trim().toLowerCase();
+        const emailInterno = String(row[2] || '').trim().toLowerCase();
+        const ativo = row[4];
+        if (ativo && clickupUsername && emailInterno) {
+          mappingByUsername[clickupUsername] = emailInterno;
+        }
+      }
+    }
+
     function isTrue(value) {
       return value === true || String(value).toLowerCase() === 'true';
+    }
+
+    function isEmailLike(value) {
+      return typeof value === 'string' && value.indexOf('@') !== -1;
     }
 
     function matchesStatus(rowStatus) {
@@ -1874,6 +1901,19 @@ function listClickUpTasks(options) {
 
       if (!matchesStatus(record.status)) {
         continue;
+      }
+
+      if (currentUserEmail) {
+        let responsavelEmail = String(record.responsavel_email || '').trim().toLowerCase();
+        const responsavelPrincipal = String(record.responsavel_principal || '').trim();
+        if (!responsavelEmail && isEmailLike(responsavelPrincipal)) {
+          responsavelEmail = responsavelPrincipal.toLowerCase();
+        } else if (!responsavelEmail && responsavelPrincipal) {
+          responsavelEmail = mappingByUsername[responsavelPrincipal.toLowerCase()] || '';
+        }
+        if (!responsavelEmail || responsavelEmail !== currentUserEmail) {
+          continue;
+        }
       }
 
       if (query) {
