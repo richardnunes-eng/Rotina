@@ -1,4 +1,4 @@
-<script>
+﻿<script>
 // ============================================
 // ROUTINE APP - Frontend JavaScript
 // ============================================
@@ -10,8 +10,10 @@
 // ADICIONAR LOGO APÓS (function() { 'use strict';
 // ============================================
 
-  // Set to your Web App deployment URL (Deploy -> Manage deployments -> Web app URL)
-  const WEBAPP_URL = '';
+  const appConfig = {
+    webAppUrl: '',
+    version: ''
+  };
 
 const diagnostics = {
   lastCall: null,
@@ -145,36 +147,63 @@ window.callServer = callServer;
 
   const frameGuard = {
     getWebAppUrl: function() {
-      return (WEBAPP_URL || '').trim();
+      return (appConfig.webAppUrl || '').trim();
     },
     isFramed: function() {
       return window.top !== window.self;
     },
-    showMissingUrl: function() {
-      const msg = 'WEBAPP_URL vazio. Defina a URL do Web App (Deploy -> Manage deployments -> Web app URL).';
-      console.error(msg);
-      alert(msg);
-
+    showSetup: function() {
       const loading = document.getElementById('loading-screen');
-      if (loading) {
-        loading.innerHTML = `<div style="max-width: 520px; text-align: center;">
-          <h2>Configure o Web App URL</h2>
-          <p>Defina a constante WEBAPP_URL no arquivo app.html com a URL do deployment.</p>
-          <p>Exemplo: https://script.google.com/macros/s/SEU_ID/exec</p>
-        </div>`;
-        loading.style.display = 'flex';
+      if (!loading) {
+        alert('WEBAPP_URL vazio. Configure o Web App URL no setup.');
+        return;
       }
+
+      loading.innerHTML = `<div style="max-width: 520px; text-align: center;">
+        <h2>Configure o Web App</h2>
+        <p>Informe o Deployment ID do Web App (Deploy -> Manage deployments).</p>
+        <input id="deployment-id-input" type="text" style="width: 100%; padding: 10px; margin: 12px 0;" placeholder="Deployment ID">
+        <button id="deployment-id-save" style="padding: 10px 16px;">Salvar</button>
+        <p id="deployment-id-status" style="margin-top: 12px; color: #d32f2f;"></p>
+      </div>`;
+      loading.style.display = 'flex';
+
+      const saveBtn = loading.querySelector('#deployment-id-save');
+      const input = loading.querySelector('#deployment-id-input');
+      const status = loading.querySelector('#deployment-id-status');
+
+      saveBtn.addEventListener('click', async () => {
+        const deploymentId = (input.value || '').trim();
+        if (!deploymentId) {
+          status.textContent = 'Informe um Deployment ID valido.';
+          return;
+        }
+        status.textContent = 'Salvando...';
+        try {
+          const response = await callServer.execute('saveDeploymentId', [deploymentId], 15000);
+          if (response && response.ok && response.data && response.data.webAppUrl) {
+            appConfig.webAppUrl = response.data.webAppUrl;
+            status.textContent = 'Salvo. Redirecionando...';
+            window.location.href = appConfig.webAppUrl;
+          } else {
+            status.textContent = (response && response.error) ? response.error : 'Falha ao salvar. Tente novamente.';
+          }
+        } catch (err) {
+          console.error('Falha ao salvar deploymentId:', err);
+          status.textContent = 'Erro ao salvar. Tente novamente.';
+        }
+      });
     },
     redirectOutOfFrame: function() {
       const url = this.getWebAppUrl();
       if (!url) {
-        this.showMissingUrl();
+        console.warn('webAppUrl vazio. Exibindo tela de setup.');
+        this.showSetup();
         return false;
       }
       console.warn('App carregado dentro de iframe. Redirecionando para o Web App.');
-      alert('Redirecionando para o Web App fora do iframe.');
       try {
-        window.top.location = url;
+        window.top.location.href = url;
       } catch (err) {
         console.error('Falha ao redirecionar para o Web App:', err);
         alert('Falha ao redirecionar. Abra o Web App URL manualmente.');
@@ -2144,16 +2173,34 @@ window.callServer = callServer;
   // INITIALIZATION
   // ============================================
 
+  async function bootstrap() {
+    try {
+      const configResponse = await callServer.execute('apiGetConfig', [], 15000);
+      if (configResponse && configResponse.ok && configResponse.data) {
+        appConfig.webAppUrl = configResponse.data.webAppUrl || '';
+        appConfig.version = configResponse.data.version || '';
+      } else {
+        console.error('Falha ao carregar configuracao:', configResponse);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar configuracao:', error);
+    }
+
+    if (frameGuard.isFramed()) {
+      frameGuard.redirectOutOfFrame();
+      return;
+    }
+
+    if (!frameGuard.getWebAppUrl()) {
+      frameGuard.showSetup();
+      return;
+    }
+
+    await bootstrap();
+  }
+
   async function init() {
     try {
-      if (!frameGuard.getWebAppUrl()) {
-        console.warn('WEBAPP_URL vazio. Defina a URL do Web App para evitar problemas de iframe.');
-      }
-
-      if (frameGuard.isFramed()) {
-        frameGuard.redirectOutOfFrame();
-        return;
-      }
 
       // Carregar preferências
       const savedPrefs = storage.load('preferences');
@@ -2162,12 +2209,9 @@ window.callServer = callServer;
       }
       
       // Aplicar tema
-      theme.init();
+      theme.bootstrap();
 
-      if (!frameGuard.getWebAppUrl()) {
-        toast.error('WEBAPP_URL vazio. Configure a URL do Web App em app.html.');
-      }
-      
+
       // Tentar carregar cache
       const cachedState = storage.load('appCache');
       
@@ -2237,7 +2281,7 @@ window.callServer = callServer;
       if (appContainer) appContainer.style.display = 'grid';
       
       // Inicializar router
-      router.init();
+      router.bootstrap();
     }
   }
 
@@ -2246,12 +2290,16 @@ window.callServer = callServer;
 
   // Iniciar quando o DOM estiver pronto
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', bootstrap);
   } else {
-    init();
+    bootstrap();
   }
 
 })();
 </script>
+
+
+
+
 
 

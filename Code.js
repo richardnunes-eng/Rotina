@@ -91,6 +91,45 @@ function ping() {
   });
 }
 
+function getWebAppUrl() {
+  try {
+    const serviceUrl = ScriptApp.getService().getUrl();
+    if (serviceUrl) return serviceUrl;
+  } catch (e) {
+    Logger.log('ScriptApp.getService().getUrl() falhou: ' + e.toString());
+  }
+
+  const deploymentId = PropertiesService.getScriptProperties().getProperty('WEBAPP_DEPLOYMENT_ID');
+  if (deploymentId) {
+    return 'https://script.google.com/macros/s/' + deploymentId + '/exec';
+  }
+
+  return '';
+}
+
+function saveDeploymentId(deploymentId) {
+  return safeExecute('saveDeploymentId', () => {
+    const trimmed = (deploymentId || '').trim();
+    if (!trimmed) {
+      return { ok: false, error: 'Deployment ID vazio.' };
+    }
+    PropertiesService.getScriptProperties().setProperty('WEBAPP_DEPLOYMENT_ID', trimmed);
+    return { ok: true, data: { webAppUrl: getWebAppUrl() } };
+  });
+}
+
+function apiGetConfig() {
+  return safeExecute('apiGetConfig', () => {
+    return {
+      ok: true,
+      data: {
+        webAppUrl: getWebAppUrl(),
+        version: '2.0-FIXED'
+      }
+    };
+  });
+}
+
 // Configuração da planilha
 const SPREADSHEET_ID = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
 
@@ -749,6 +788,15 @@ function generateRecurringTasks(userKey, options) {
 // ============================================
 
 function doGet() {
+  const webAppUrl = getWebAppUrl();
+  if (!webAppUrl) {
+    return HtmlService.createTemplateFromFile('setup')
+      .evaluate()
+      .setTitle('Routine App - Setup')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
   return HtmlService.createTemplateFromFile('index')
     .evaluate()
     .setTitle('Routine App v2')
