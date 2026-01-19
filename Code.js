@@ -563,9 +563,18 @@ function getAppState(userKey) {
   };
 }
 
+function getAppStateSafe(userKey) {
+  const state = getAppState(userKey);
+  const sanitized = sanitizeForJSON(state);
+  if (sanitized && sanitized.ok === false && sanitized.error) {
+    throw new Error(sanitized.error);
+  }
+  return sanitized;
+}
+
 function initApp(providedUserKey) {
   return safeExecute('initApp', () => {
-    log('=== INIT APP COMEÇÎANDO ===');
+    log('=== INIT APP COMEï¿½ï¿½ANDO ===');
     const userKey = providedUserKey || getUserKey();
 
     // Criar usuÇ­rio se nÇœo existir
@@ -587,10 +596,10 @@ function initApp(providedUserKey) {
 
     const response = {
       ok: true,
-      data: getAppState(userKey)
+      data: getAppStateSafe(userKey)
     };
 
-    log('=== INIT APP CONCLUÇ?DO ===');
+    log('=== INIT APP CONCLUï¿½?DO ===');
     return response;
   }, { userKey: providedUserKey });
 }
@@ -617,7 +626,7 @@ function createHabit(userKey, habitData) {
     };
 
     createRecord('HABITS', habit);
-    return { ok: true, data: getAppState(userKey) };
+    return { ok: true, data: getAppStateSafe(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -644,7 +653,7 @@ function updateHabit(userKey, habitId, updates) {
     if (updates.active !== undefined) updateData.active = updates.active;
 
     updateRecord('HABITS', habitId, updateData);
-    return { ok: true, data: getAppState(userKey) };
+    return { ok: true, data: getAppStateSafe(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -662,7 +671,7 @@ function deleteHabit(userKey, habitId) {
     const logs = findRecords('HABIT_LOG', { habitId: habitId, userKey: userKey });
     logs.forEach(log => deleteRecord('HABIT_LOG', log.id));
 
-    return { ok: true, data: getAppState(userKey) };
+    return { ok: true, data: getAppStateSafe(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -680,7 +689,7 @@ function toggleHabitCompletion(userKey, habitId, date) {
     if (logs.length > 0) {
       const newStatus = !logs[0].completed;
       updateRecord('HABIT_LOG', logs[0].id, { completed: newStatus });
-      return { ok: true, data: getAppState(userKey) };
+      return { ok: true, data: getAppStateSafe(userKey) };
     } else {
       const log = {
         id: Utilities.getUuid(),
@@ -691,7 +700,7 @@ function toggleHabitCompletion(userKey, habitId, date) {
         createdAt: new Date().toISOString()
       };
       createRecord('HABIT_LOG', log);
-      return { ok: true, data: getAppState(userKey) };
+      return { ok: true, data: getAppStateSafe(userKey) };
     }
   } catch (error) {
     return { ok: false, error: error.toString() };
@@ -735,7 +744,7 @@ function createTask(userKey, taskData) {
       generateRecurringTasks(userKey, { daysAhead: 30 });
     }
 
-    return { ok: true, data: getAppState(userKey) };
+    return { ok: true, data: getAppStateSafe(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -773,7 +782,7 @@ function updateTask(userKey, taskId, updates) {
       generateRecurringTasks(userKey, { daysAhead: 30 });
     }
 
-    return { ok: true, data: getAppState(userKey) };
+    return { ok: true, data: getAppStateSafe(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -795,7 +804,7 @@ function deleteTask(userKey, taskId) {
     const instances = findRecords('TASKS', { templateTaskId: taskId, userKey: userKey });
     instances.forEach(inst => deleteRecord('TASKS', inst.id));
 
-    return { ok: true, data: getAppState(userKey) };
+    return { ok: true, data: getAppStateSafe(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -826,7 +835,7 @@ function addChecklistItem(userKey, taskId, text) {
     };
 
     createRecord('TASK_CHECKLIST', item);
-    return { ok: true, data: getAppState(userKey) };
+    return { ok: true, data: getAppStateSafe(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -841,7 +850,7 @@ function toggleChecklistItem(userKey, itemId) {
 
     const newStatus = !items[0].done;
     updateRecord('TASK_CHECKLIST', itemId, { done: newStatus });
-    return { ok: true, data: getAppState(userKey) };
+    return { ok: true, data: getAppStateSafe(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -855,7 +864,7 @@ function deleteChecklistItem(userKey, itemId) {
     }
 
     deleteRecord('TASK_CHECKLIST', itemId);
-    return { ok: true, data: getAppState(userKey) };
+    return { ok: true, data: getAppStateSafe(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -881,7 +890,7 @@ function createGoal(userKey, goalData) {
     };
 
     createRecord('GOALS', goal);
-    return { ok: true, data: getAppState(userKey) };
+    return { ok: true, data: getAppStateSafe(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -906,7 +915,7 @@ function updateGoal(userKey, goalId, updates) {
     if (updates.status) updateData.status = updates.status;
 
     updateRecord('GOALS', goalId, updateData);
-    return { ok: true, data: getAppState(userKey) };
+    return { ok: true, data: getAppStateSafe(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -924,7 +933,7 @@ function deleteGoal(userKey, goalId) {
     const logs = findRecords('GOAL_LOG', { goalId: goalId, userKey: userKey });
     logs.forEach(log => deleteRecord('GOAL_LOG', log.id));
 
-    return { ok: true, data: getAppState(userKey) };
+    return { ok: true, data: getAppStateSafe(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -954,7 +963,7 @@ function addGoalProgress(userKey, goalId, delta, note, date) {
     };
 
     createRecord('GOAL_LOG', log);
-    return { ok: true, data: getAppState(userKey) };
+    return { ok: true, data: getAppStateSafe(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -977,7 +986,7 @@ function upsertJournalEntry(userKey, date, mood, energy, note, gratitude) {
         updatedAt: new Date().toISOString()
       };
       updateRecord('JOURNAL', entries[0].id, updateData);
-      return { ok: true, data: getAppState(userKey) };
+      return { ok: true, data: getAppStateSafe(userKey) };
     } else {
       const entry = {
         id: Utilities.getUuid(),
@@ -991,7 +1000,7 @@ function upsertJournalEntry(userKey, date, mood, energy, note, gratitude) {
         updatedAt: new Date().toISOString()
       };
       createRecord('JOURNAL', entry);
-      return { ok: true, data: getAppState(userKey) };
+      return { ok: true, data: getAppStateSafe(userKey) };
     }
   } catch (error) {
     return { ok: false, error: error.toString() };
