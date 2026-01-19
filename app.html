@@ -52,6 +52,22 @@
     }
   };
 
+  function applyFullState(nextState) {
+    if (!nextState) return;
+    appState.userKey = nextState.userKey || appState.userKey;
+    appState.habits = Array.isArray(nextState.habits) ? nextState.habits : [];
+    appState.habitLogs = Array.isArray(nextState.habitLogs) ? nextState.habitLogs : [];
+    appState.tasks = Array.isArray(nextState.tasks) ? nextState.tasks : [];
+    appState.taskChecklists = Array.isArray(nextState.taskChecklists) ? nextState.taskChecklists : [];
+    appState.goals = Array.isArray(nextState.goals) ? nextState.goals : [];
+    appState.goalLogs = Array.isArray(nextState.goalLogs) ? nextState.goalLogs : [];
+    appState.journals = Array.isArray(nextState.journals) ? nextState.journals : [];
+  }
+
+  function refreshUI() {
+    router.render(appState.currentView);
+  }
+
   // ============================================
   // UTILITIES
   // ============================================
@@ -1033,8 +1049,8 @@
       const result = await api.toggleHabitCompletion(habitId, today);
 
       if (result.ok) {
-        Object.assign(appState, result.data);
-        router.render(appState.currentView);
+        applyFullState(result.data);
+        refreshUI();
         toast.success('Rotina atualizada!');
       } else {
         toast.error('Erro ao atualizar rotina: ' + result.error);
@@ -1122,9 +1138,9 @@
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
-        Object.assign(appState, result.data);
+        applyFullState(result.data);
         modal.close();
-        router.render(appState.currentView);
+        refreshUI();
         toast.success('Rotina criada com sucesso!');
       } else {
         toast.error('Erro ao criar rotina: ' + result.error);
@@ -1199,9 +1215,9 @@
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
-        Object.assign(appState, result.data);
+        applyFullState(result.data);
         modal.close();
-        router.render(appState.currentView);
+        refreshUI();
         toast.success('Rotina atualizada!');
       } else {
         toast.error('Erro ao atualizar rotina: ' + result.error);
@@ -1223,9 +1239,9 @@
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
-        Object.assign(appState, result.data);
+        applyFullState(result.data);
         modal.close();
-        router.render(appState.currentView);
+        refreshUI();
         toast.success('Rotina excluída!');
       } else {
         toast.error('Erro ao excluir rotina: ' + result.error);
@@ -1238,8 +1254,8 @@
       const result = await api.setTaskStatus(taskId, status);
 
       if (result.ok) {
-        Object.assign(appState, result.data);
-        router.render(appState.currentView);
+        applyFullState(result.data);
+        refreshUI();
         toast.success('Tarefa atualizada!');
       } else {
         toast.error('Erro ao atualizar tarefa: ' + result.error);
@@ -1328,9 +1344,9 @@
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
-        Object.assign(appState, result.data);
+        applyFullState(result.data);
         modal.close();
-        router.render(appState.currentView);
+        refreshUI();
         toast.success('Tarefa criada com sucesso!');
       } else {
         toast.error('Erro ao criar tarefa: ' + result.error);
@@ -1432,9 +1448,9 @@
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
-        Object.assign(appState, result.data);
+        applyFullState(result.data);
         modal.close();
-        router.render(appState.currentView);
+        refreshUI();
         toast.success('Tarefa atualizada!');
       } else {
         toast.error('Erro ao atualizar tarefa: ' + result.error);
@@ -1456,9 +1472,9 @@
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
-        Object.assign(appState, result.data);
+        applyFullState(result.data);
         modal.close();
-        router.render(appState.currentView);
+        refreshUI();
         toast.success('Tarefa excluída!');
       } else {
         toast.error('Erro ao excluir tarefa: ' + result.error);
@@ -1560,9 +1576,9 @@
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
-        Object.assign(appState, result.data);
+        applyFullState(result.data);
         modal.close();
-        router.render(appState.currentView);
+        refreshUI();
         toast.success('Meta criada com sucesso!');
       } else {
         toast.error('Erro ao criar meta: ' + result.error);
@@ -1688,9 +1704,9 @@
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
-        Object.assign(appState, result.data);
+        applyFullState(result.data);
         modal.close();
-        router.render(appState.currentView);
+        refreshUI();
         toast.success('Meta atualizada!');
       } else {
         toast.error('Erro ao atualizar meta: ' + result.error);
@@ -1709,7 +1725,8 @@
       const result = await api.addGoalProgress(goalId, delta, '', utils.getTodayISO());
 
       if (result.ok) {
-        Object.assign(appState, result.data);
+        applyFullState(result.data);
+        refreshUI();
         toast.success('Progresso adicionado!');
         deltaInput.value = '';
 
@@ -1738,9 +1755,9 @@
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
-        Object.assign(appState, result.data);
+        applyFullState(result.data);
         modal.close();
-        router.render(appState.currentView);
+        refreshUI();
         toast.success('Meta excluída!');
       } else {
         toast.error('Erro ao excluir meta: ' + result.error);
@@ -2283,7 +2300,7 @@
         const result = await api.initApp();
 
         if (result.ok) {
-          Object.assign(appState, result.data);
+          applyFullState(result.data);
           storage.save('appCache', appState);
 
           // Atualizar email do usuário na sidebar
@@ -2354,7 +2371,7 @@
     const cachedData = storage.load('appCache');
     if (cachedData && cachedData.userKey) {
       console.log('Dados em cache encontrados, carregando...');
-      Object.assign(appState, cachedData);
+      applyFullState(cachedData);
     }
 
     // Inicializar app
@@ -2363,6 +2380,7 @@
 
 })();
 </script>
+
 
 
 

@@ -550,12 +550,25 @@ function getSessionInfo() {
   }
 }
 
+function getAppState(userKey) {
+  return {
+    userKey: userKey,
+    habits: findRecords('HABITS', { userKey: userKey }) || [],
+    habitLogs: findRecords('HABIT_LOG', { userKey: userKey }) || [],
+    tasks: findRecords('TASKS', { userKey: userKey }) || [],
+    taskChecklists: findRecords('TASK_CHECKLIST', { userKey: userKey }) || [],
+    goals: findRecords('GOALS', { userKey: userKey }) || [],
+    goalLogs: findRecords('GOAL_LOG', { userKey: userKey }) || [],
+    journals: findRecords('JOURNAL', { userKey: userKey }) || []
+  };
+}
+
 function initApp(providedUserKey) {
   return safeExecute('initApp', () => {
-    log('=== INIT APP COMEÇANDO ===');
+    log('=== INIT APP COME��ANDO ===');
     const userKey = providedUserKey || getUserKey();
 
-    // Criar usuário se não existir
+    // Criar usuǭrio se nǜo existir
     const existingUser = findRecords('USERS', { userKey: userKey });
     if (existingUser.length === 0) {
       createRecord('USERS', {
@@ -569,33 +582,15 @@ function initApp(providedUserKey) {
     try {
       generateRecurringTasks(userKey, { daysAhead: 14 });
     } catch (e) {
-      Logger.log('Erro ao gerar recorrências: ' + e.toString());
+      Logger.log('Erro ao gerar recorrǦncias: ' + e.toString());
     }
-
-    // Buscar todos os dados do usuário
-    const habits = findRecords('HABITS', { userKey: userKey });
-    const habitLogs = findRecords('HABIT_LOG', { userKey: userKey });
-    const tasks = findRecords('TASKS', { userKey: userKey });
-    const taskChecklists = findRecords('TASK_CHECKLIST', { userKey: userKey });
-    const goals = findRecords('GOALS', { userKey: userKey });
-    const goalLogs = findRecords('GOAL_LOG', { userKey: userKey });
-    const journals = findRecords('JOURNAL', { userKey: userKey });
 
     const response = {
       ok: true,
-      data: {
-        userKey: userKey,
-        habits: habits || [],
-        habitLogs: habitLogs || [],
-        tasks: tasks || [],
-        taskChecklists: taskChecklists || [],
-        goals: goals || [],
-        goalLogs: goalLogs || [],
-        journals: journals || []
-      }
+      data: getAppState(userKey)
     };
 
-    log('=== INIT APP CONCLUÍDO ===');
+    log('=== INIT APP CONCLU�?DO ===');
     return response;
   }, { userKey: providedUserKey });
 }
@@ -622,7 +617,7 @@ function createHabit(userKey, habitData) {
     };
 
     createRecord('HABITS', habit);
-    return { ok: true, data: habit };
+    return { ok: true, data: getAppState(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -649,7 +644,7 @@ function updateHabit(userKey, habitId, updates) {
     if (updates.active !== undefined) updateData.active = updates.active;
 
     updateRecord('HABITS', habitId, updateData);
-    return { ok: true, data: { id: habitId, ...updateData } };
+    return { ok: true, data: getAppState(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -667,7 +662,7 @@ function deleteHabit(userKey, habitId) {
     const logs = findRecords('HABIT_LOG', { habitId: habitId, userKey: userKey });
     logs.forEach(log => deleteRecord('HABIT_LOG', log.id));
 
-    return { ok: true, data: { id: habitId } };
+    return { ok: true, data: getAppState(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -685,7 +680,7 @@ function toggleHabitCompletion(userKey, habitId, date) {
     if (logs.length > 0) {
       const newStatus = !logs[0].completed;
       updateRecord('HABIT_LOG', logs[0].id, { completed: newStatus });
-      return { ok: true, data: { id: logs[0].id, completed: newStatus } };
+      return { ok: true, data: getAppState(userKey) };
     } else {
       const log = {
         id: Utilities.getUuid(),
@@ -696,7 +691,7 @@ function toggleHabitCompletion(userKey, habitId, date) {
         createdAt: new Date().toISOString()
       };
       createRecord('HABIT_LOG', log);
-      return { ok: true, data: log };
+      return { ok: true, data: getAppState(userKey) };
     }
   } catch (error) {
     return { ok: false, error: error.toString() };
@@ -740,7 +735,7 @@ function createTask(userKey, taskData) {
       generateRecurringTasks(userKey, { daysAhead: 30 });
     }
 
-    return { ok: true, data: task };
+    return { ok: true, data: getAppState(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -778,7 +773,7 @@ function updateTask(userKey, taskId, updates) {
       generateRecurringTasks(userKey, { daysAhead: 30 });
     }
 
-    return { ok: true, data: { id: taskId, ...updateData } };
+    return { ok: true, data: getAppState(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -800,7 +795,7 @@ function deleteTask(userKey, taskId) {
     const instances = findRecords('TASKS', { templateTaskId: taskId, userKey: userKey });
     instances.forEach(inst => deleteRecord('TASKS', inst.id));
 
-    return { ok: true, data: { id: taskId } };
+    return { ok: true, data: getAppState(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -831,7 +826,7 @@ function addChecklistItem(userKey, taskId, text) {
     };
 
     createRecord('TASK_CHECKLIST', item);
-    return { ok: true, data: item };
+    return { ok: true, data: getAppState(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -846,7 +841,7 @@ function toggleChecklistItem(userKey, itemId) {
 
     const newStatus = !items[0].done;
     updateRecord('TASK_CHECKLIST', itemId, { done: newStatus });
-    return { ok: true, data: { id: itemId, done: newStatus } };
+    return { ok: true, data: getAppState(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -860,7 +855,7 @@ function deleteChecklistItem(userKey, itemId) {
     }
 
     deleteRecord('TASK_CHECKLIST', itemId);
-    return { ok: true, data: { id: itemId } };
+    return { ok: true, data: getAppState(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -886,7 +881,7 @@ function createGoal(userKey, goalData) {
     };
 
     createRecord('GOALS', goal);
-    return { ok: true, data: goal };
+    return { ok: true, data: getAppState(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -911,7 +906,7 @@ function updateGoal(userKey, goalId, updates) {
     if (updates.status) updateData.status = updates.status;
 
     updateRecord('GOALS', goalId, updateData);
-    return { ok: true, data: { id: goalId, ...updateData } };
+    return { ok: true, data: getAppState(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -929,7 +924,7 @@ function deleteGoal(userKey, goalId) {
     const logs = findRecords('GOAL_LOG', { goalId: goalId, userKey: userKey });
     logs.forEach(log => deleteRecord('GOAL_LOG', log.id));
 
-    return { ok: true, data: { id: goalId } };
+    return { ok: true, data: getAppState(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -959,7 +954,7 @@ function addGoalProgress(userKey, goalId, delta, note, date) {
     };
 
     createRecord('GOAL_LOG', log);
-    return { ok: true, data: { goal: { id: goalId, currentValue: currentValue }, log: log } };
+    return { ok: true, data: getAppState(userKey) };
   } catch (error) {
     return { ok: false, error: error.toString() };
   }
@@ -982,7 +977,7 @@ function upsertJournalEntry(userKey, date, mood, energy, note, gratitude) {
         updatedAt: new Date().toISOString()
       };
       updateRecord('JOURNAL', entries[0].id, updateData);
-      return { ok: true, data: { id: entries[0].id, ...updateData } };
+      return { ok: true, data: getAppState(userKey) };
     } else {
       const entry = {
         id: Utilities.getUuid(),
@@ -996,7 +991,7 @@ function upsertJournalEntry(userKey, date, mood, energy, note, gratitude) {
         updatedAt: new Date().toISOString()
       };
       createRecord('JOURNAL', entry);
-      return { ok: true, data: entry };
+      return { ok: true, data: getAppState(userKey) };
     }
   } catch (error) {
     return { ok: false, error: error.toString() };
@@ -2107,3 +2102,6 @@ function removeClickUpTrigger() {
     return { ok: false, error: error.toString() };
   }
 }
+
+
+
