@@ -368,63 +368,25 @@
     },
     
     deleteHabit: async function(habitId) {
-      return await this.call('deleteHabit', appState.userKey, habitId);
-    },
-    
-    toggleHabitCompletion: async function(habitId, date) {
-      return await this.call('toggleHabitCompletion', appState.userKey, habitId, date);
-    },
-    
-    createTask: async function(taskData) {
-      return await this.call('createTask', appState.userKey, taskData);
-    },
-    
-    updateTask: async function(taskId, updates) {
-      return await this.call('updateTask', appState.userKey, taskId, updates);
-    },
-    
-    deleteTask: async function(taskId) {
-      return await this.call('deleteTask', appState.userKey, taskId);
-    },
-    
-    setTaskStatus: async function(taskId, status) {
-      return await this.call('setTaskStatus', appState.userKey, taskId, status);
-    },
-    
-    addChecklistItem: async function(taskId, text) {
-      return await this.call('addChecklistItem', appState.userKey, taskId, text);
-    },
-    
-    toggleChecklistItem: async function(itemId) {
-      return await this.call('toggleChecklistItem', appState.userKey, itemId);
-    },
-    
-    deleteChecklistItem: async function(itemId) {
-      return await this.call('deleteChecklistItem', appState.userKey, itemId);
-    },
-    
-    createGoal: async function(goalData) {
-      return await this.call('createGoal', appState.userKey, goalData);
-    },
-    
-    updateGoal: async function(goalId, updates) {
-      return await this.call('updateGoal', appState.userKey, goalId, updates);
-    },
-    
-    deleteGoal: async function(goalId) {
-      return await this.call('deleteGoal', appState.userKey, goalId);
-    },
-    
-    addGoalProgress: async function(goalId, delta, note, date) {
-      return await this.call('addGoalProgress', appState.userKey, goalId, delta, note, date);
-    },
+      if (!confirm('Tem certeza que deseja excluir esta rotina? Esta ação não pode ser desfeita.')) {
+        return;
+      }
 
-    listClickUpTasks: async function(options) {
-      return await this.call('listClickUpTasks', options);
-    },
+      const modalActions = document.querySelectorAll('.modal-footer button');
+      modalActions.forEach(btn => btn.disabled = true);
 
-    exportUserData: async function(format) {
-      return await this.call('exportUserData', appState.userKey, format);
+      const result = await api.deleteHabit(habitId);
+
+      modalActions.forEach(btn => btn.disabled = false);
+
+      if (result.ok) {
+        applyFullState(result.data);
+        modal.close();
+        refreshUI();
+        toast.success('Rotina excluída!');
+      } else {
+        toast.error('Erro ao excluir rotina: ' + result.error);
+      }
     }
   };
 
@@ -1396,15 +1358,15 @@
         return;
       }
 
-      // Desabilitar modal durante operaÃ§Ã£o
       const modalActions = document.querySelectorAll('.modal-footer button');
       modalActions.forEach(btn => btn.disabled = true);
 
       const habitData = {
-        title,        metric,
+        name,
+        description,
         category,
         frequency,
-        reminder,
+        reminderTime: reminder ? scheduledTime : '',
         scheduledTime,
         timeWindow,
         repeatEnabled: true,
@@ -1415,7 +1377,6 @@
 
       const result = await api.createHabit(habitData);
 
-      // Reabilitar botÃµes
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
@@ -1517,7 +1478,6 @@
         return;
       }
 
-      // Desabilitar modal durante operacao
       const modalActions = document.querySelectorAll('.modal-footer button');
       modalActions.forEach(btn => btn.disabled = true);
 
@@ -1531,9 +1491,9 @@
         repeatType,
         repeatInterval
       };
+
       const result = await api.updateHabit(habitId, updates);
 
-      // Reabilitar botÃµes
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
@@ -1547,24 +1507,22 @@
     },
 
     deleteHabit: async function(habitId) {
-      if (!confirm('Tem certeza que deseja excluir esta rotina? Esta aÃ§Ã£o nÃ£o pode ser desfeita.')) {
+      if (!confirm('Tem certeza que deseja excluir esta rotina? Esta ação não pode ser desfeita.')) {
         return;
       }
 
-      // Desabilitar modal durante operaÃ§Ã£o
       const modalActions = document.querySelectorAll('.modal-footer button');
       modalActions.forEach(btn => btn.disabled = true);
 
       const result = await api.deleteHabit(habitId);
 
-      // Reabilitar botÃµes
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
         applyFullState(result.data);
         modal.close();
         refreshUI();
-        toast.success('Rotina excluÃ­da!');
+        toast.success('Rotina excluída!');
       } else {
         toast.error('Erro ao excluir rotina: ' + result.error);
       }
@@ -1684,6 +1642,13 @@
 
       const modalActions = document.querySelectorAll('.modal-footer button');
       modalActions.forEach(btn => btn.disabled = true);
+      const primaryBtn = document.querySelector('.modal-footer .btn-primary');
+      const primaryLabel = primaryBtn ? primaryBtn.textContent : '';
+      if (primaryBtn) {
+        primaryBtn.textContent = 'Criando...';
+        primaryBtn.classList.add('is-loading');
+      }
+      toast.info('Criando tarefa...');
 
       const taskData = {
         title,
@@ -1702,6 +1667,10 @@
       const result = await api.createTask(taskData);
 
       modalActions.forEach(btn => btn.disabled = false);
+      if (primaryBtn) {
+        primaryBtn.textContent = primaryLabel;
+        primaryBtn.classList.remove('is-loading');
+      }
 
       if (result.ok) {
         applyFullState(result.data);
@@ -1853,24 +1822,22 @@
     },
 
     deleteTask: async function(taskId) {
-      if (!confirm('Tem certeza que deseja excluir esta tarefa? Esta aÃ§Ã£o nÃ£o pode ser desfeita.')) {
+      if (!confirm('Tem certeza que deseja excluir esta tarefa? Esta ação não pode ser desfeita.')) {
         return;
       }
 
-      // Desabilitar modal durante operaÃ§Ã£o
       const modalActions = document.querySelectorAll('.modal-footer button');
       modalActions.forEach(btn => btn.disabled = true);
 
       const result = await api.deleteTask(taskId);
 
-      // Reabilitar botÃµes
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
         applyFullState(result.data);
         modal.close();
         refreshUI();
-        toast.success('Tarefa excluÃ­da!');
+        toast.success('Tarefa excluída!');
       } else {
         toast.error('Erro ao excluir tarefa: ' + result.error);
       }
@@ -2155,24 +2122,22 @@
     },
 
     deleteGoal: async function(goalId) {
-      if (!confirm('Tem certeza que deseja excluir esta meta? Esta aÃ§Ã£o nÃ£o pode ser desfeita.')) {
+      if (!confirm('Tem certeza que deseja excluir esta meta? Esta ação não pode ser desfeita.')) {
         return;
       }
 
-      // Desabilitar modal durante operaÃ§Ã£o
       const modalActions = document.querySelectorAll('.modal-footer button');
       modalActions.forEach(btn => btn.disabled = true);
 
       const result = await api.deleteGoal(goalId);
 
-      // Reabilitar botÃµes
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
         applyFullState(result.data);
         modal.close();
         refreshUI();
-        toast.success('Meta excluÃ­da!');
+        toast.success('Meta excluída!');
       } else {
         toast.error('Erro ao excluir meta: ' + result.error);
       }
@@ -2895,7 +2860,6 @@
 
 })();
 </script>
-
 
 
 

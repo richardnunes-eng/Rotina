@@ -214,6 +214,117 @@ function normalizeRepeatInput(input) {
   };
 }
 
+function computeNextOccurrence(repeat, startDateStr) {
+  if (!repeat || !repeat.repeatEnabled) return '';
+
+  const interval = Math.max(1, parseInt(repeat.repeatInterval || 1, 10) || 1);
+  const type = String(repeat.repeatType || 'DAILY').toUpperCase();
+  const weekdays = Array.isArray(repeat.repeatWeekdays) ? repeat.repeatWeekdays.map(Number).filter(v => !isNaN(v)) : [];
+  const monthday = parseInt(repeat.repeatMonthday || 0, 10) || 0;
+  const until = repeat.repeatUntil ? parseDateOnly(repeat.repeatUntil) : null;
+
+  const anchor = parseDateOnly(startDateStr);
+  if (!anchor) return '';
+
+  const today = toDateOnly(new Date());
+  let next = new Date(anchor.getTime());
+
+  if (type === 'DAILY') {
+    while (next < today) {
+      next = addDays(next, interval);
+    }
+  } else if (type === 'WEEKLY') {
+    const days = weekdays.length ? weekdays : [anchor.getDay()];
+    const anchorWeekStart = startOfWeek(anchor);
+    for (let i = 0; i < 366 * 2; i++) {
+      const candidate = addDays(anchor, i);
+      const candidateWeekStart = startOfWeek(candidate);
+      const weekDiff = Math.round((candidateWeekStart - anchorWeekStart) / (7 * 24 * 60 * 60 * 1000));
+      if (weekDiff % interval !== 0) continue;
+      if (days.indexOf(candidate.getDay()) === -1) continue;
+      if (candidate >= today) {
+        next = candidate;
+        break;
+      }
+    }
+  } else if (type === 'MONTHLY') {
+    const targetDay = monthday || anchor.getDate();
+    let y = anchor.getFullYear();
+    let m = anchor.getMonth();
+    for (let i = 0; i < 1200; i += interval) {
+      const candidate = makeMonthDate(y, m + i, targetDay);
+      if (candidate >= today) {
+        next = candidate;
+        break;
+      }
+    }
+  } else if (type === 'YEARLY') {
+    const targetMonth = anchor.getMonth();
+    const targetDay = anchor.getDate();
+    let y = anchor.getFullYear();
+    for (let i = 0; i < 200; i += interval) {
+      const candidate = makeMonthDate(y + i, targetMonth, targetDay);
+      if (candidate >= today) {
+        next = candidate;
+        break;
+      }
+    }
+  } else {
+    while (next < today) {
+      next = addDays(next, interval);
+    }
+  }
+
+  if (until && next > until) return '';
+  return formatDateOnly(next);
+}
+
+function parseDateOnly(value) {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const datePart = value.split('T')[0];
+    const parts = datePart.split('-');
+    if (parts.length === 3 && parts[0].length === 4) {
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      const d = parseInt(parts[2], 10);
+      if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+        return new Date(y, m - 1, d);
+      }
+    }
+  }
+  const parsed = new Date(value);
+  if (isNaN(parsed)) return null;
+  return toDateOnly(parsed);
+}
+
+function toDateOnly(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addDays(date, days) {
+  const d = new Date(date.getTime());
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function startOfWeek(date) {
+  const d = toDateOnly(date);
+  d.setDate(d.getDate() - d.getDay());
+  return d;
+}
+
+function makeMonthDate(year, month, day) {
+  const first = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const safeDay = Math.min(day, lastDay);
+  return new Date(first.getFullYear(), first.getMonth(), safeDay);
+}
+
+function formatDateOnly(date) {
+  return Utilities.formatDate(date, getDefaultTimeZone(), 'yyyy-MM-dd');
+}
+
 function normalizeDueFields(input) {
   const dueDate = input.dueDate || '';
   const dueTime = input.dueTime || '';
@@ -605,7 +716,44 @@ function generateRecurringTasks(userKey, options) {
   const daysAhead = options.daysAhead || 14;
 
   try {
-    const templates = findRecords('TASKS', { userKey: userKey, isRecurring: true });
+    const ss = getOrCreateSpreadsheet();
+    const sheet = ss.getSheetByName('TASKS');
+    if (!sheet || sheet.getLastRow() <= 1) {
+      return { ok: true, data: { generated: false } };
+    }
+
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const colIndex = name => headers.indexOf(name);
+    const idxUser = colIndex('userKey');
+    const idxIsRecurring = colIndex('isRecurring');
+    const idxTemplateId = colIndex('templateTaskId');
+    const idxDueDate = colIndex('dueDate');
+
+    const templates = [];
+    const existingByTemplate = {};
+
+    const isTruthy = value => value === true || value === 1 || value === '1' || value === 'true' || value === 'TRUE';
+
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (idxUser !== -1 && row[idxUser] != userKey) continue;
+
+      const templateId = idxTemplateId !== -1 ? String(row[idxTemplateId] || '') : '';
+      const dueDate = idxDueDate !== -1 ? String(row[idxDueDate] || '') : '';
+      if (templateId) {
+        if (!existingByTemplate[templateId]) existingByTemplate[templateId] = {};
+        if (dueDate) existingByTemplate[templateId][dueDate] = true;
+      }
+
+      if (idxIsRecurring !== -1 && isTruthy(row[idxIsRecurring])) {
+        const record = {};
+        for (let j = 0; j < headers.length; j++) {
+          record[headers[j]] = row[j];
+        }
+        templates.push(record);
+      }
+    }
 
     templates.forEach(template => {
       if (!template.recurrenceStartDate) return;
@@ -617,20 +765,14 @@ function generateRecurringTasks(userKey, options) {
       futureDate.setDate(futureDate.getDate() + daysAhead);
 
       // Gerar instâncias para os próximos dias
+      const existing = existingByTemplate[template.id] || {};
       for (let d = new Date(today); d <= futureDate; d.setDate(d.getDate() + 1)) {
         if (d < startDate) continue;
         if (endDate && d > endDate) break;
 
         const dateStr = d.toISOString().split('T')[0];
 
-        // Verificar se já existe instância para este dia
-        const existing = findRecords('TASKS', {
-          userKey: userKey,
-          templateTaskId: template.id,
-          dueDate: dateStr
-        });
-
-        if (existing.length === 0) {
+        if (!existing[dateStr]) {
           // Criar nova instância
           const instance = {
             id: Utilities.getUuid(),
@@ -657,6 +799,7 @@ function generateRecurringTasks(userKey, options) {
           };
 
           createRecord('TASKS', instance);
+          existing[dateStr] = true;
         }
       }
     });
@@ -2440,8 +2583,6 @@ function removeClickUpTrigger() {
     return { ok: false, error: error.toString() };
   }
 }
-
-
 
 
 
