@@ -49,6 +49,11 @@
       weekStart: 'monday',
       timeFormat: '24h',
       reduceAnimations: false
+    },
+    focus: {
+      taskId: '',
+      remainingSeconds: 1500,
+      isRunning: false
     }
   };
 
@@ -83,6 +88,22 @@
       if (!dateStr) return '';
       const date = new Date(dateStr);
       return date.toLocaleDateString('pt-BR');
+    },
+
+    formatTime: function(timeStr) {
+      if (!timeStr) return '';
+      return String(timeStr).slice(0, 5);
+    },
+
+    formatRelativeDate: function(dateStr) {
+      if (!dateStr) return '';
+      const today = this.getTodayISO();
+      if (dateStr === today) return 'Hoje';
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowISO = tomorrow.toISOString().split('T')[0];
+      if (dateStr === tomorrowISO) return 'Amanhã';
+      return this.formatDate(dateStr);
     },
     
     getTodayISO: function() {
@@ -488,8 +509,14 @@
         case 'calendar':
           views.renderCalendar(container);
           break;
+        case 'agenda':
+          views.renderAgenda(container);
+          break;
         case 'goals':
           views.renderGoals(container);
+          break;
+        case 'focus':
+          views.renderFocus(container);
           break;
         case 'clickup':
           views.renderClickUp(container);
@@ -511,45 +538,114 @@
     renderDashboard: function(container) {
       const today = utils.getTodayISO();
       const completedHabitsToday = appState.habitLogs.filter(log =>
-        log.date === today && log.completed
+        log.date === currentDate && log.completed
       ).length;
       const totalHabits = appState.habits.filter(h => h.active !== false).length;
       const activeTasks = appState.tasks.filter(t => t.status !== 'done').length;
-      const activeGoals = appState.goals.filter(g => g.status === 'active').length;
+      const dueToday = appState.tasks.filter(t => t.duedate === currentDate).length;
+      const overdue = appState.tasks.filter(t => t.dueDate && t.dueDate < today && t.status !== 'done').length;
+      const agendaItems = this.getAgendaItems(today);
+      const streaks = appState.habits.map(h => utils.calculateStreak(appState.habitLogs, h.id).current);
+      const currentStreak = streaks.length ? Math.max(...streaks) : 0;
 
       container.innerHTML = `
         <div>
-          <h1>Dashboard</h1>
+          <div class="page-header">
+            <div class="page-title">
+              <h1>Dashboard</h1>
+              <span>Centro de comando do seu dia.</span>
+            </div>
+            <div class="flex gap-sm">
+              <button class="btn btn-primary" onclick="habitHandlers.openCreateModal()">+ Rotina</button>
+              <button class="btn btn-secondary" onclick="taskHandlers.openCreateModal()">+ Tarefa</button>
+              <button class="btn btn-secondary" onclick="goalHandlers.openCreateModal()">+ Meta</button>
+            </div>
+          </div>
 
           <div class="kpi-grid">
             <div class="kpi-card glow-blue">
               <div class="kpi-label">Rotinas Hoje</div>
               <div class="kpi-value">${completedHabitsToday}/${totalHabits}</div>
-              <div class="kpi-change">${Math.round((completedHabitsToday/totalHabits)*100) || 0}% concluído</div>
+              <div class="kpi-change">${Math.round((completedHabitsToday/totalHabits)*100) || 0}% concluido</div>
             </div>
 
             <div class="kpi-card glow-orange">
               <div class="kpi-label">Tarefas Ativas</div>
               <div class="kpi-value">${activeTasks}</div>
-              <div class="kpi-change">Pendentes</div>
+              <div class="kpi-change">${dueToday} para hoje</div>
             </div>
 
             <div class="kpi-card glow-green">
-              <div class="kpi-label">Metas Ativas</div>
-              <div class="kpi-value">${activeGoals}</div>
-              <div class="kpi-change">Em progresso</div>
+              <div class="kpi-label">Streak Atual</div>
+              <div class="kpi-value">${currentStreak}</div>
+              <div class="kpi-change">Maior sequencia</div>
             </div>
 
             <div class="kpi-card glow-purple">
-              <div class="kpi-label">Produtividade</div>
-              <div class="kpi-value">${Math.round(((completedHabitsToday/totalHabits)*100 || 0))}%</div>
-              <div class="kpi-change">Score geral</div>
+              <div class="kpi-label">Atrasadas</div>
+              <div class="kpi-value">${overdue}</div>
+              <div class="kpi-change">Prioridade hoje</div>
             </div>
           </div>
 
-          <div class="card">
+          <div class="quick-actions">
+            <div class="quick-action" onclick="router.navigate('agenda')">
+              <div class="quick-action-icon"><span class="material-icons">schedule</span></div>
+              <div>
+                <strong>Agenda do dia</strong>
+                <div style="font-size: 13px; color: var(--text-secondary);">Veja sua linha do tempo</div>
+              </div>
+            </div>
+            <div class="quick-action" onclick="router.navigate('focus')">
+              <div class="quick-action-icon"><span class="material-icons">center_focus_strong</span></div>
+              <div>
+                <strong>Iniciar foco</strong>
+                <div style="font-size: 13px; color: var(--text-secondary);">Sessao de 25 min</div>
+              </div>
+            </div>
+            <div class="quick-action" onclick="taskHandlers.openCreateModal()">
+              <div class="quick-action-icon"><span class="material-icons">add_task</span></div>
+              <div>
+                <strong>Quick add</strong>
+                <div style="font-size: 13px; color: var(--text-secondary);">Tarefa imediata</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card mt-lg">
             <div class="card-header">
-              <h2 class="card-title">Rotinas de Hoje</h2>
+              <h2 class="card-title">Agenda de hoje</h2>
+              <a href="#agenda" class="btn btn-sm btn-primary">Abrir agenda</a>
+            </div>
+            ${agendaItems.length === 0 ? '<div class="empty-state"><p>Nada agendado. Que tal planejar?</p></div>' : `
+              <div class="timeline">
+                ${agendaItems.slice(0, 6).map(item => `
+                  <div class="timeline-row">
+                    <div class="timeline-time">${item.time ? utils.formatTime(item.time) : 'Livre'}</div>
+                    <div class="timeline-card">
+                      <div>
+                        <strong>${utils.sanitize(item.title)}</strong>
+                        <div style="font-size: 12px; color: var(--text-secondary);">${utils.sanitize(item.meta)}</div>
+                      </div>
+                      <span class="badge">${item.type}</span>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            `}
+          </div>
+
+          <div class="card mt-lg">
+            <div class="card-header">
+              <h2 class="card-title">Heatmap de habitos</h2>
+              <span class="chip">Ultimos 90 dias</span>
+            </div>
+            ${this.renderHeatmap()}
+          </div>
+
+          <div class="card mt-lg">
+            <div class="card-header">
+              <h2 class="card-title">Rotinas de hoje</h2>
               <a href="#habits" class="btn btn-sm btn-primary">Ver todas</a>
             </div>
             <div id="dashboard-habits-list"></div>
@@ -557,7 +653,7 @@
 
           <div class="card mt-md">
             <div class="card-header">
-              <h2 class="card-title">Tarefas Recentes</h2>
+              <h2 class="card-title">Tarefas recentes</h2>
               <a href="#tasks" class="btn btn-sm btn-primary">Ver todas</a>
             </div>
             <div id="dashboard-tasks-list"></div>
@@ -578,9 +674,9 @@
         return;
       }
 
-      const today = utils.getTodayISO();
+      const currentDate = agendaHandlers.state.date || utils.getTodayISO();
       container.innerHTML = activeHabits.map(habit => {
-        const log = appState.habitLogs.find(l => l.habitId === habit.id && l.date === today);
+        const log = appState.habitLogs.find(l => l.habitId === habit.id && l.date === currentDate);
         const completed = log?.completed || false;
 
         return `
@@ -612,12 +708,149 @@
           <div>
             <strong>${utils.sanitize(task.title)}</strong>
             <p style="font-size: 13px; color: var(--text-secondary); margin: 4px 0 0 0;">
-              ${task.status === 'todo' ? '📋 A fazer' : task.status === 'doing' ? '⚡ Em andamento' : '✅ Concluído'}
+              ${task.status === 'todo' ? 'A fazer' : task.status === 'doing' ? 'Em andamento' : 'Concluido'}
             </p>
           </div>
           <a href="#tasks" class="btn btn-sm btn-secondary">Ver</a>
         </div>
       `).join('');
+    },
+
+    getAgendaItems: function(dateStr) {
+      const items = [];
+      const habits = appState.habits.filter(h => h.active !== false);
+      habits.forEach(habit => {
+        const occursToday = habit.nextOccurrence ? habit.nextOccurrence === dateStr : true;
+        if (!occursToday) return;
+        items.push({
+          time: habit.scheduledTime || '',
+          title: habit.name,
+          type: 'habit',
+          meta: habit.timeWindow || 'Rotina',
+          status: 'pending',
+          id: habit.id
+        });
+      });
+
+      const tasks = appState.tasks.filter(t => t.dueDate === dateStr);
+      tasks.forEach(task => {
+        items.push({
+          time: task.dueTime || '',
+          title: task.title,
+          type: 'task',
+          meta: task.status || 'open',
+          status: task.status,
+          id: task.id
+        });
+      });
+
+      const goals = appState.goals.filter(g => g.dueDate === dateStr);
+      goals.forEach(goal => {
+        items.push({
+          time: goal.dueTime || '',
+          title: goal.title,
+          type: 'goal',
+          meta: 'Meta',
+          status: goal.status,
+          id: goal.id
+        });
+      });
+
+      items.sort((a, b) => {
+        if (!a.time && b.time) return 1;
+        if (a.time && !b.time) return -1;
+        return a.time.localeCompare(b.time);
+      });
+
+      return items;
+    },
+
+    renderAgenda: function(container) {
+      const currentDate = agendaHandlers.state.date || utils.getTodayISO();
+      const items = this.getAgendaItems(currentDate);
+      const rows = items.length === 0
+        ? `<div class="empty-state"><p>Nenhum item agendado para hoje.</p></div>`
+        : `<div class="timeline">${items.map(item => `
+          <div class="timeline-row">
+            <div class="timeline-time">${item.time ? utils.formatTime(item.time) : 'Livre'}</div>
+            <div class="timeline-card">
+              <div>
+                <strong>${utils.sanitize(item.title)}</strong>
+                <div style="font-size: 12px; color: var(--text-secondary);">${utils.sanitize(item.meta)}</div>
+              </div>
+              <span class="badge">${item.type}</span>
+            </div>
+          </div>
+        `).join('')}</div>`;
+
+      container.innerHTML = `
+        <div>
+          <div class="page-header">
+            <div class="page-title">
+              <h1>Agenda</h1>
+              <span>Visao do dia com rotinas, tarefas e metas.</span>
+            </div>
+            <div class="flex gap-sm">
+              <button class="btn btn-secondary" onclick="agendaHandlers.previousDay()">Voltar</button>
+              <button class="btn btn-primary" onclick="agendaHandlers.today()">Hoje</button>
+              <button class="btn btn-secondary" onclick="agendaHandlers.nextDay()">Avancar</button>
+            </div>
+          </div>
+
+          <div class="agenda-grid">
+            <div class="agenda-day">
+              <div class="agenda-header">
+                <h3>${utils.formatRelativeDate(currentDate)}</h3>
+                <span class="chip">America/Sao_Paulo</span>
+              </div>
+              ${rows}
+            </div>
+          </div>
+        </div>
+      `;
+    },
+
+    renderFocus: function(container) {
+      const activeTask = appState.tasks.find(t => t.id === appState.focus.taskId) || null;
+      const label = activeTask ? activeTask.title : 'Escolha uma tarefa';
+      const minutes = Math.floor(appState.focus.remainingSeconds / 60).toString().padStart(2, '0');
+      const seconds = (appState.focus.remainingSeconds % 60).toString().padStart(2, '0');
+
+      container.innerHTML = `
+        <div>
+          <div class="page-header">
+            <div class="page-title">
+              <h1>Modo Foco</h1>
+              <span>Sessoes rapidas para avancar tarefas criticas.</span>
+            </div>
+          </div>
+
+          <div class="focus-shell">
+            <span class="chip">${utils.sanitize(label)}</span>
+            <div class="focus-timer">${minutes}:${seconds}</div>
+            <div class="flex gap-sm" style="justify-content: center;">
+              <button class="btn btn-secondary" onclick="focusHandlers.pickTask()">Selecionar tarefa</button>
+              <button class="btn btn-primary" onclick="focusHandlers.toggle()">${appState.focus.isRunning ? 'Pausar' : 'Iniciar'}</button>
+              <button class="btn btn-secondary" onclick="focusHandlers.reset()">Resetar</button>
+            </div>
+          </div>
+        </div>
+      `;
+    },
+
+    renderHeatmap: function() {
+      const days = 90;
+      const today = new Date();
+      const cells = [];
+      for (let i = days - 1; i >= 0; i--) {
+        const date = new Date(today);
+        date.setDate(date.getDate() - i);
+        const iso = date.toISOString().split('T')[0];
+        const count = appState.habitLogs.filter(log => log.date === iso && log.completed).length;
+        const level = count >= 4 ? 4 : count >= 3 ? 3 : count >= 2 ? 2 : count >= 1 ? 1 : 0;
+        cells.push(`<div class="heatmap-cell" data-level="${level}" title="${iso}"></div>`);
+      }
+      return `<div class="heatmap">${cells.join('')}</div>`;
     },
 
     renderHabits: function(container) {
@@ -653,11 +886,12 @@
         return;
       }
 
-      const today = utils.getTodayISO();
+      const currentDate = agendaHandlers.state.date || utils.getTodayISO();
       container.innerHTML = `<div class="grid">${habits.map(habit => {
-        const log = appState.habitLogs.find(l => l.habitId === habit.id && l.date === today);
+        const log = appState.habitLogs.find(l => l.habitId === habit.id && l.date === currentDate);
         const completed = log?.completed || false;
         const streak = utils.calculateStreak(appState.habitLogs, habit.id);
+        const scheduleLabel = [habit.scheduledTime, habit.timeWindow].filter(Boolean).join(' � ');
 
         return `
           <div class="card ${completed ? 'glow-green' : ''}">
@@ -676,12 +910,12 @@
             <p style="color: var(--text-secondary); margin-bottom: 12px;">${utils.sanitize(habit.description || '')}</p>
             <div class="flex gap-md">
               <div style="flex: 1;">
-                <small style="color: var(--text-tertiary);">Sequência Atual</small>
-                <div style="font-size: 24px; font-weight: 700; color: var(--accent-blue);">${streak.current} 🔥</div>
+                <small style="color: var(--text-tertiary);">Sequencia atual</small>
+                <div style="font-size: 24px; font-weight: 700; color: var(--accent-blue);"> dias</div>
               </div>
               <div style="flex: 1;">
-                <small style="color: var(--text-tertiary);">Melhor Sequência</small>
-                <div style="font-size: 24px; font-weight: 700; color: var(--accent-purple);">${streak.max} ⭐</div>
+                <small style="color: var(--text-tertiary);">Melhor sequencia</small>
+                <div style="font-size: 24px; font-weight: 700; color: var(--accent-purple);"> dias</div>
               </div>
             </div>
           </div>
@@ -757,6 +991,9 @@
         normal: 'badge-normal',
         low: 'badge-low'
       };
+      const dueLabel = task.dueDate
+        ? `${utils.formatRelativeDate(task.dueDate)}${task.dueTime ? ' ' + utils.formatTime(task.dueTime) : ''}`
+        : 'Sem data';
 
       return `
         <div class="card">
@@ -767,6 +1004,9 @@
           <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">
             ${utils.sanitize(task.description || '')}
           </p>
+          <div class="flex gap-sm" style="margin-bottom: 12px;">
+            <span class="chip">${utils.sanitize(dueLabel)}</span>
+          </div>
           <div class="flex gap-sm">
             ${task.status !== 'done' ? `
               <button class="btn btn-sm btn-success" onclick="taskHandlers.setStatus('${task.id}', 'done')" style="flex: 1;">
@@ -1098,6 +1338,35 @@
               <span style="margin-left: 8px;">Ativar lembrete</span>
             </label>
           </div>
+
+          <div class="form-group">
+            <label class="form-label">Horario</label>
+            <input type="time" class="form-input" id="habit-time">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Janela do dia</label>
+            <select class="form-select" id="habit-window">
+              <option value="">Sem janela</option>
+              <option value="morning">Manha</option>
+              <option value="afternoon">Tarde</option>
+              <option value="evening">Noite</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Repeticao</label>
+            <select class="form-select" id="habit-repeat-type">
+              <option value="DAILY">Diaria</option>
+              <option value="WEEKLY">Semanal</option>
+              <option value="MONTHLY">Mensal</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Intervalo (a cada)</label>
+            <input type="number" class="form-input" id="habit-repeat-interval" value="1" min="1">
+          </div>
         </form>
       `;
 
@@ -1113,6 +1382,10 @@
       const category = document.getElementById('habit-category').value;
       const frequency = document.getElementById('habit-frequency').value;
       const reminder = document.getElementById('habit-reminder').checked;
+      const scheduledTime = document.getElementById('habit-time').value;
+      const timeWindow = document.getElementById('habit-window').value;
+      const repeatType = document.getElementById('habit-repeat-type').value;
+      const repeatInterval = parseInt(document.getElementById('habit-repeat-interval').value, 10) || 1;
 
       if (!name) {
         toast.error('Por favor, preencha o nome da rotina');
@@ -1124,11 +1397,15 @@
       modalActions.forEach(btn => btn.disabled = true);
 
       const habitData = {
-        name,
-        description,
+        title,        metric,
         category,
         frequency,
         reminder,
+        scheduledTime,
+        timeWindow,
+        repeatEnabled: true,
+        repeatType,
+        repeatInterval,
         active: true
       };
 
@@ -1179,7 +1456,35 @@
             </select>
           </div>
 
-          <div style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border-color);">
+                    <div class="form-group">
+            <label class="form-label">Horario</label>
+            <input type="time" class="form-input" id="edit-habit-time" value="${habit.scheduledTime || ''}">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Janela do dia</label>
+            <select class="form-select" id="edit-habit-window">
+              <option value="" ${!habit.timeWindow ? 'selected' : ''}>Sem janela</option>
+              <option value="morning" ${habit.timeWindow === 'morning' ? 'selected' : ''}>Manha</option>
+              <option value="afternoon" ${habit.timeWindow === 'afternoon' ? 'selected' : ''}>Tarde</option>
+              <option value="evening" ${habit.timeWindow === 'evening' ? 'selected' : ''}>Noite</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Repeticao</label>
+            <select class="form-select" id="edit-habit-repeat-type">
+              <option value="DAILY" ${habit.repeatType === 'DAILY' ? 'selected' : ''}>Diaria</option>
+              <option value="WEEKLY" ${habit.repeatType === 'WEEKLY' ? 'selected' : ''}>Semanal</option>
+              <option value="MONTHLY" ${habit.repeatType === 'MONTHLY' ? 'selected' : ''}>Mensal</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Intervalo (a cada)</label>
+            <input type="number" class="form-input" id="edit-habit-repeat-interval" value="${habit.repeatInterval || 1}" min="1">
+          </div>
+<div style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border-color);">
             <button type="button" class="btn btn-danger w-full" onclick="habitHandlers.deleteHabit('${habitId}')">
               <span class="material-icons">delete</span>
               Excluir Rotina
@@ -1198,17 +1503,30 @@
       const name = document.getElementById('edit-habit-name').value.trim();
       const description = document.getElementById('edit-habit-description').value.trim();
       const category = document.getElementById('edit-habit-category').value;
+      const scheduledTime = document.getElementById('edit-habit-time').value;
+      const timeWindow = document.getElementById('edit-habit-window').value;
+      const repeatType = document.getElementById('edit-habit-repeat-type').value;
+      const repeatInterval = parseInt(document.getElementById('edit-habit-repeat-interval').value, 10) || 1;
 
       if (!name) {
         toast.error('Por favor, preencha o nome da rotina');
         return;
       }
 
-      // Desabilitar modal durante operação
+      // Desabilitar modal durante operacao
       const modalActions = document.querySelectorAll('.modal-footer button');
       modalActions.forEach(btn => btn.disabled = true);
 
-      const updates = { name, description, category };
+      const updates = {
+        name,
+        description,
+        category,
+        scheduledTime,
+        timeWindow,
+        repeatEnabled: true,
+        repeatType,
+        repeatInterval
+      };
       const result = await api.updateHabit(habitId, updates);
 
       // Reabilitar botões
@@ -1300,6 +1618,37 @@
           </div>
 
           <div class="form-group">
+            <label class="form-label">Hora</label>
+            <input type="time" class="form-input" id="task-due-time">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Fuso horario</label>
+            <select class="form-select" id="task-timezone">
+              <option value="America/Sao_Paulo" selected>America/Sao_Paulo</option>
+              <option value="UTC">UTC</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Repeticao</label>
+            <select class="form-select" id="task-repeat-type">
+              <option value="">Sem repeticao</option>
+              <option value="DAILY">Diaria</option>
+              <option value="WEEKLY">Semanal</option>
+              <option value="MONTHLY">Mensal</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Intervalo (a cada)</label>
+            <input type="number" class="form-input" id="task-repeat-interval" value="1" min="1">
+          </div>
+
+          <div class="form-group">
+          </div>
+
+          <div class="form-group">
             <label class="form-label">Categoria</label>
             <input type="text" class="form-input" id="task-category" placeholder="Ex: Trabalho, Pessoal, Estudos">
           </div>
@@ -1318,14 +1667,17 @@
       const priority = document.getElementById('task-priority').value;
       const status = document.getElementById('task-status').value;
       const dueDate = document.getElementById('task-due-date').value;
+      const dueTime = document.getElementById('task-due-time').value;
+      const timezone = document.getElementById('task-timezone').value;
+      const repeatType = document.getElementById('task-repeat-type').value;
+      const repeatInterval = parseInt(document.getElementById('task-repeat-interval').value, 10) || 1;
       const category = document.getElementById('task-category').value.trim();
 
       if (!title) {
-        toast.error('Por favor, preencha o título da tarefa');
+        toast.error('Por favor, preencha o titulo da tarefa');
         return;
       }
 
-      // Desabilitar modal durante operação
       const modalActions = document.querySelectorAll('.modal-footer button');
       modalActions.forEach(btn => btn.disabled = true);
 
@@ -1335,12 +1687,16 @@
         priority,
         status,
         dueDate: dueDate || null,
+        dueTime: dueTime || null,
+        timezone,
+        repeatEnabled: repeatType !== '',
+        repeatType,
+        repeatInterval,
         category: category || null
       };
 
       const result = await api.createTask(taskData);
 
-      // Reabilitar botões
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
@@ -1353,47 +1709,75 @@
       }
     },
 
-    openEditModal: function(taskId) {
+    openEditModal': function(taskId) {
       const task = appState.tasks.find(t => t.id === taskId);
       if (!task) {
-        toast.error('Tarefa não encontrada');
+        toast.error('Tarefa nao encontrada');
         return;
       }
 
       const content = `
         <form id="edit-task-form">
           <div class="form-group">
-            <label class="form-label">Título da Tarefa *</label>
+            <label class="form-label">Titulo da Tarefa *</label>
             <input type="text" class="form-input" id="edit-task-title" value="${utils.sanitize(task.title)}" required>
           </div>
 
           <div class="form-group">
-            <label class="form-label">Descrição</label>
+            <label class="form-label">Descricao</label>
             <textarea class="form-textarea" id="edit-task-description">${utils.sanitize(task.description || '')}</textarea>
           </div>
 
           <div class="form-group">
             <label class="form-label">Prioridade</label>
             <select class="form-select" id="edit-task-priority">
-              <option value="low" ${task.priority === 'low' ? 'selected' : ''}>🟢 Baixa</option>
-              <option value="normal" ${task.priority === 'normal' ? 'selected' : ''}>🔵 Normal</option>
-              <option value="high" ${task.priority === 'high' ? 'selected' : ''}>🟡 Alta</option>
-              <option value="urgent" ${task.priority === 'urgent' ? 'selected' : ''}>🔴 Urgente</option>
+              <option value="low" ${task.priority === 'low' ? 'selected' : ''}>Baixa</option>
+              <option value="normal" ${task.priority === 'normal' ? 'selected' : ''}>Normal</option>
+              <option value="high" ${task.priority === 'high' ? 'selected' : ''}>Alta</option>
+              <option value="urgent" ${task.priority === 'urgent' ? 'selected' : ''}>Urgente</option>
             </select>
           </div>
 
           <div class="form-group">
             <label class="form-label">Status</label>
             <select class="form-select" id="edit-task-status">
-              <option value="todo" ${task.status === 'todo' ? 'selected' : ''}>📋 A Fazer</option>
-              <option value="doing" ${task.status === 'doing' ? 'selected' : ''}>⚡ Em Andamento</option>
-              <option value="done" ${task.status === 'done' ? 'selected' : ''}>✅ Concluído</option>
+              <option value="todo" ${task.status === 'todo' ? 'selected' : ''}>A fazer</option>
+              <option value="doing" ${task.status === 'doing' ? 'selected' : ''}>Em andamento</option>
+              <option value="done" ${task.status === 'done' ? 'selected' : ''}>Concluido</option>
             </select>
           </div>
 
           <div class="form-group">
             <label class="form-label">Data de Vencimento</label>
             <input type="date" class="form-input" id="edit-task-due-date" value="${task.dueDate || ''}">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Hora</label>
+            <input type="time" class="form-input" id="edit-task-due-time" value="${task.dueTime || ''}">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Fuso horario</label>
+            <select class="form-select" id="edit-task-timezone">
+              <option value="America/Sao_Paulo" ${task.timezone === 'America/Sao_Paulo' ? 'selected' : ''}>America/Sao_Paulo</option>
+              <option value="UTC" ${task.timezone === 'UTC' ? 'selected' : ''}>UTC</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Repeticao</label>
+            <select class="form-select" id="edit-task-repeat-type">
+              <option value="" ${!task.repeatType ? 'selected' : ''}>Sem repeticao</option>
+              <option value="DAILY" ${task.repeatType === 'DAILY' ? 'selected' : ''}>Diaria</option>
+              <option value="WEEKLY" ${task.repeatType === 'WEEKLY' ? 'selected' : ''}>Semanal</option>
+              <option value="MONTHLY" ${task.repeatType === 'MONTHLY' ? 'selected' : ''}>Mensal</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Intervalo (a cada)</label>
+            <input type="number" class="form-input" id="edit-task-repeat-interval" value="${task.repeatInterval || 1}" min="1">
           </div>
 
           <div class="form-group">
@@ -1422,14 +1806,17 @@
       const priority = document.getElementById('edit-task-priority').value;
       const status = document.getElementById('edit-task-status').value;
       const dueDate = document.getElementById('edit-task-due-date').value;
+      const dueTime = document.getElementById('edit-task-due-time').value;
+      const timezone = document.getElementById('edit-task-timezone').value;
+      const repeatType = document.getElementById('edit-task-repeat-type').value;
+      const repeatInterval = parseInt(document.getElementById('edit-task-repeat-interval').value, 10) || 1;
       const category = document.getElementById('edit-task-category').value.trim();
 
       if (!title) {
-        toast.error('Por favor, preencha o título da tarefa');
+        toast.error('Por favor, preencha o titulo da tarefa');
         return;
       }
 
-      // Desabilitar modal durante operação
       const modalActions = document.querySelectorAll('.modal-footer button');
       modalActions.forEach(btn => btn.disabled = true);
 
@@ -1439,12 +1826,16 @@
         priority,
         status,
         dueDate: dueDate || null,
+        dueTime: dueTime || null,
+        timezone,
+        repeatEnabled: repeatType !== '',
+        repeatType,
+        repeatInterval,
         category: category || null
       };
 
       const result = await api.updateTask(taskId, updates);
 
-      // Reabilitar botões
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
@@ -1457,7 +1848,7 @@
       }
     },
 
-    deleteTask: async function(taskId) {
+    deleteTask': async function(taskId) {
       if (!confirm('Tem certeza que deseja excluir esta tarefa? Esta ação não pode ser desfeita.')) {
         return;
       }
@@ -1517,6 +1908,22 @@
           </div>
 
           <div class="form-group">
+            <label class="form-label">Hora</label>
+            <input type="time" class="form-input" id="goal-deadline-time">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Fuso horario</label>
+            <select class="form-select" id="goal-timezone">
+              <option value="America/Sao_Paulo" selected>America/Sao_Paulo</option>
+              <option value="UTC">UTC</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+          </div>
+
+          <div class="form-group">
             <label class="form-label">Categoria</label>
             <select class="form-select" id="goal-category">
               <option value="health">🏃 Saúde</option>
@@ -1537,42 +1944,44 @@
     },
 
     createGoal: async function() {
-      const name = document.getElementById('goal-name').value.trim();
-      const description = document.getElementById('goal-description').value.trim();
+      const title = document.getElementById('goal-name').value.trim();
+      const metric = document.getElementById('goal-description').value.trim();
       const currentValue = parseInt(document.getElementById('goal-current').value) || 0;
       const targetValue = parseInt(document.getElementById('goal-target').value);
       const unit = document.getElementById('goal-unit').value.trim();
       const deadline = document.getElementById('goal-deadline').value;
+      const deadlineTime = document.getElementById('goal-deadline-time').value;
+      const timezone = document.getElementById('goal-timezone').value;
       const category = document.getElementById('goal-category').value;
 
-      if (!name) {
+      if (!title) {
         toast.error('Por favor, preencha o nome da meta');
         return;
       }
 
       if (!targetValue || targetValue <= 0) {
-        toast.error('Por favor, defina um valor alvo válido');
+        toast.error('Por favor, defina um valor alvo valido');
         return;
       }
 
-      // Desabilitar modal durante operação
       const modalActions = document.querySelectorAll('.modal-footer button');
       modalActions.forEach(btn => btn.disabled = true);
 
       const goalData = {
-        name,
-        description,
+        title,
+        metric,
         currentValue,
         targetValue,
         unit: unit || null,
-        deadline: deadline || null,
+        dueDate: deadline || null,
+        dueTime: deadlineTime || null,
+        timezone,
         category,
         status: 'active'
       };
 
       const result = await api.createGoal(goalData);
 
-      // Reabilitar botões
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
@@ -1585,10 +1994,10 @@
       }
     },
 
-    openEditModal: function(goalId) {
+    openEditModal': function(goalId) {
       const goal = appState.goals.find(g => g.id === goalId);
       if (!goal) {
-        toast.error('Meta não encontrada');
+        toast.error('Meta nao encontrada');
         return;
       }
 
@@ -1596,36 +2005,22 @@
         <form id="edit-goal-form">
           <div class="form-group">
             <label class="form-label">Nome da Meta *</label>
-            <input type="text" class="form-input" id="edit-goal-name" value="${utils.sanitize(goal.name)}" required>
+            <input type="text" class="form-input" id="edit-goal-name" value="${utils.sanitize(goal.title || goal.name || '')}" required>
           </div>
 
           <div class="form-group">
-            <label class="form-label">Descrição</label>
-            <textarea class="form-textarea" id="edit-goal-description">${utils.sanitize(goal.description || '')}</textarea>
+            <label class="form-label">Descricao</label>
+            <textarea class="form-textarea" id="edit-goal-description">${utils.sanitize(goal.metric || goal.description || '')}</textarea>
           </div>
 
           <div class="form-group">
-            <label class="form-label">Progresso Atual</label>
-            <div class="flex gap-sm" style="align-items: center;">
-              <input type="number" class="form-input" id="edit-goal-current" value="${goal.currentValue || 0}" min="0" step="1" style="flex: 1;">
-              <span style="color: var(--text-secondary);">/ ${goal.targetValue}</span>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Adicionar Progresso</label>
-            <div class="flex gap-sm">
-              <input type="number" class="form-input" id="goal-progress-delta" placeholder="+10" step="1" style="flex: 1;">
-              <button type="button" class="btn btn-primary" onclick="goalHandlers.addProgress('${goalId}')">
-                <span class="material-icons">add</span>
-              </button>
-            </div>
-            <small style="color: var(--text-tertiary); font-size: 12px;">Digite um valor positivo ou negativo</small>
+            <label class="form-label">Valor Atual</label>
+            <input type="number" class="form-input" id="edit-goal-current" value="${goal.currentValue || 0}" min="0" step="1">
           </div>
 
           <div class="form-group">
             <label class="form-label">Valor Alvo *</label>
-            <input type="number" class="form-input" id="edit-goal-target" value="${goal.targetValue}" required min="1" step="1">
+            <input type="number" class="form-input" id="edit-goal-target" value="${goal.targetValue || 0}" required min="1" step="1">
           </div>
 
           <div class="form-group">
@@ -1635,18 +2030,31 @@
 
           <div class="form-group">
             <label class="form-label">Prazo</label>
-            <input type="date" class="form-input" id="edit-goal-deadline" value="${goal.deadline || ''}">
+            <input type="date" class="form-input" id="edit-goal-deadline" value="${goal.dueDate || goal.deadline || ''}">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Hora</label>
+            <input type="time" class="form-input" id="edit-goal-deadline-time" value="${goal.dueTime || ''}">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Fuso horario</label>
+            <select class="form-select" id="edit-goal-timezone">
+              <option value="America/Sao_Paulo" ${goal.timezone === 'America/Sao_Paulo' ? 'selected' : ''}>America/Sao_Paulo</option>
+              <option value="UTC" ${goal.timezone === 'UTC' ? 'selected' : ''}>UTC</option>
+            </select>
           </div>
 
           <div class="form-group">
             <label class="form-label">Categoria</label>
             <select class="form-select" id="edit-goal-category">
-              <option value="health" ${goal.category === 'health' ? 'selected' : ''}>🏃 Saúde</option>
-              <option value="career" ${goal.category === 'career' ? 'selected' : ''}>💼 Carreira</option>
-              <option value="learning" ${goal.category === 'learning' ? 'selected' : ''}>📚 Aprendizado</option>
-              <option value="finance" ${goal.category === 'finance' ? 'selected' : ''}>💰 Finanças</option>
-              <option value="personal" ${goal.category === 'personal' ? 'selected' : ''}>🎯 Pessoal</option>
-              <option value="other" ${goal.category === 'other' ? 'selected' : ''}>📌 Outro</option>
+              <option value="health">Saude</option>
+              <option value="career">Carreira</option>
+              <option value="learning">Aprendizado</option>
+              <option value="finance">Financas</option>
+              <option value="personal">Pessoal</option>
+              <option value="other">Outro</option>
             </select>
           </div>
 
@@ -1666,41 +2074,43 @@
     },
 
     updateGoal: async function(goalId) {
-      const name = document.getElementById('edit-goal-name').value.trim();
-      const description = document.getElementById('edit-goal-description').value.trim();
+      const title = document.getElementById('edit-goal-name').value.trim();
+      const metric = document.getElementById('edit-goal-description').value.trim();
       const currentValue = parseInt(document.getElementById('edit-goal-current').value) || 0;
       const targetValue = parseInt(document.getElementById('edit-goal-target').value);
       const unit = document.getElementById('edit-goal-unit').value.trim();
       const deadline = document.getElementById('edit-goal-deadline').value;
+      const deadlineTime = document.getElementById('edit-goal-deadline-time').value;
+      const timezone = document.getElementById('edit-goal-timezone').value;
       const category = document.getElementById('edit-goal-category').value;
 
-      if (!name) {
+      if (!title) {
         toast.error('Por favor, preencha o nome da meta');
         return;
       }
 
       if (!targetValue || targetValue <= 0) {
-        toast.error('Por favor, defina um valor alvo válido');
+        toast.error('Por favor, defina um valor alvo valido');
         return;
       }
 
-      // Desabilitar modal durante operação
       const modalActions = document.querySelectorAll('.modal-footer button');
       modalActions.forEach(btn => btn.disabled = true);
 
       const updates = {
-        name,
-        description,
+        title,
+        metric,
         currentValue,
         targetValue,
         unit: unit || null,
-        deadline: deadline || null,
+        dueDate: deadline || null,
+        dueTime: deadlineTime || null,
+        timezone,
         category
       };
 
       const result = await api.updateGoal(goalId, updates);
 
-      // Reabilitar botões
       modalActions.forEach(btn => btn.disabled = false);
 
       if (result.ok) {
@@ -1713,7 +2123,7 @@
       }
     },
 
-    addProgress: async function(goalId) {
+    addProgress': async function(goalId) {
       const deltaInput = document.getElementById('goal-progress-delta');
       const delta = parseInt(deltaInput.value);
 
@@ -1775,6 +2185,105 @@
       } else {
         toast.error('Erro ao exportar dados: ' + result.error);
       }
+    }
+  };
+
+  const agendaHandlers = {
+    state: {
+      date: utils.getTodayISO()
+    },
+
+    today: function() {
+      this.state.date = utils.getTodayISO();
+      refreshUI();
+    },
+
+    nextDay: function() {
+      const date = new Date(this.state.date);
+      date.setDate(date.getDate() + 1);
+      this.state.date = date.toISOString().split('T')[0];
+      refreshUI();
+    },
+
+    previousDay: function() {
+      const date = new Date(this.state.date);
+      date.setDate(date.getDate() - 1);
+      this.state.date = date.toISOString().split('T')[0];
+      refreshUI();
+    }
+  };
+
+  const focusHandlers = {
+    timerId: null,
+    sessionStart: null,
+
+    pickTask: function() {
+      const options = appState.tasks.map(task => `
+        <option value="${utils.sanitize(task.id)}">${utils.sanitize(task.title)}</option>
+      `).join('');
+      const content = `
+        <div class="form-group">
+          <label class="form-label">Selecione uma tarefa</label>
+          <select class="form-select" id="focus-task-select">${options}</select>
+        </div>
+      `;
+      modal.open('Selecionar tarefa', content, [
+        { label: 'Cancelar', onclick: 'modal.close()', primary: false },
+        { label: 'Confirmar', onclick: 'focusHandlers.applyTask()', primary: true }
+      ]);
+    },
+
+    applyTask: function() {
+      const select = document.getElementById('focus-task-select');
+      if (!select) return;
+      appState.focus.taskId = select.value;
+      modal.close();
+      refreshUI();
+    },
+
+    toggle: function() {
+      if (appState.focus.isRunning) {
+        appState.focus.isRunning = false;
+        clearInterval(this.timerId);
+        refreshUI();
+        return;
+      }
+
+      appState.focus.isRunning = true;
+      this.sessionStart = this.sessionStart || new Date().toISOString();
+      this.timerId = setInterval(() => {
+        if (!appState.focus.isRunning) return;
+        appState.focus.remainingSeconds -= 1;
+        if (appState.focus.remainingSeconds <= 0) {
+          this.completeSession();
+        }
+        refreshUI();
+      }, 1000);
+      refreshUI();
+    },
+
+    reset: function() {
+      appState.focus.remainingSeconds = 1500;
+      appState.focus.isRunning = false;
+      this.sessionStart = null;
+      clearInterval(this.timerId);
+      refreshUI();
+    },
+
+    completeSession: async function() {
+      const endedAt = new Date().toISOString();
+      const durationMinutes = 25;
+      appState.focus.isRunning = false;
+      appState.focus.remainingSeconds = 1500;
+      clearInterval(this.timerId);
+      refreshUI();
+
+      if (appState.focus.taskId) {
+        await api.call('logFocusSession', appState.userKey, appState.focus.taskId, this.sessionStart, endedAt, durationMinutes);
+      }
+
+      toast.success('Sessao de foco concluida!');
+      this.sessionStart = null;
     }
   };
 
@@ -2218,6 +2727,8 @@
   window.taskHandlers = taskHandlers;
   window.goalHandlers = goalHandlers;
   window.settingsHandlers = settingsHandlers;
+  window.agendaHandlers = agendaHandlers;
+  window.focusHandlers = focusHandlers;
   window.clickupHandlers = clickupHandlers;
   window.clickupPageHandlers = clickupPageHandlers;
   window.authHandlers = authHandlers;
@@ -2380,6 +2891,42 @@
 
 })();
 </script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

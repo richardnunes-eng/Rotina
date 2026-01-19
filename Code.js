@@ -59,18 +59,109 @@ function safeExecute(fnName, handler, context) {
   }
 }
 
-function sanitizeForJSON(obj) {
+
+
+function getDefaultTimeZone() {
   try {
-    const jsonString = JSON.stringify(obj, (key, value) => {
-      if (value instanceof Date) return value.toISOString();
-      if (typeof value === 'function') return undefined;
-      return value;
-    });
-    return JSON.parse(jsonString);
+    return Session.getScriptTimeZone() || 'America/Sao_Paulo';
   } catch (e) {
-    return { ok: false, error: 'Erro ao serializar: ' + e.toString() };
+    return 'America/Sao_Paulo';
   }
 }
+
+function parseUserDateTime(dateStr, timeStr, tz) {
+  if (!dateStr) return '';
+  const safeTime = timeStr && String(timeStr).length >= 4 ? String(timeStr).slice(0, 5) : '00:00';
+  const baseDate = new Date(dateStr + 'T' + safeTime + ':00');
+  const zone = tz || getDefaultTimeZone();
+  try {
+    return Utilities.formatDate(baseDate, zone, "yyyy-MM-dd'T'HH:mm:ssXXX");
+  } catch (e) {
+    return Utilities.formatDate(baseDate, zone, "yyyy-MM-dd'T'HH:mm:ssZ");
+  }
+}
+
+function formatUserDateTime(isoStr, tz) {
+  if (!isoStr) return '';
+  const date = new Date(isoStr);
+  if (isNaN(date)) return String(isoStr);
+  const zone = tz || getDefaultTimeZone();
+  return Utilities.formatDate(date, zone, 'yyyy-MM-dd HH:mm');
+}
+
+
+
+function normalizeWeekdays(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.map(Number).filter(v => !isNaN(v));
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.map(Number).filter(v => !isNaN(v));
+  } catch (e) {}
+  return [];
+}
+
+function normalizeRepeatInput(input) {
+  const repeatEnabled = !!(input.repeatEnabled || input.isRecurring);
+  const repeatType = String(input.repeatType || input.recurrenceType || (repeatEnabled ? 'DAILY' : '')).toUpperCase();
+  const repeatInterval = parseInt(input.repeatInterval || input.recurrenceInterval || 1, 10) || 1;
+  const repeatWeekdays = normalizeWeekdays(input.repeatWeekdays || input.recurrenceDays || []);
+  const repeatMonthday = parseInt(input.repeatMonthday || input.recurrenceMonthday || 0, 10) || '';
+  const repeatEnd = input.repeatEnd || '';
+  const repeatUntil = input.repeatUntil || '';
+  const repeatCount = parseInt(input.repeatCount || 0, 10) || '';
+
+  return {
+    repeatEnabled: repeatEnabled,
+    repeatType: repeatType,
+    repeatInterval: repeatInterval,
+    repeatWeekdays: repeatWeekdays,
+    repeatMonthday: repeatMonthday,
+    repeatEnd: repeatEnd,
+    repeatUntil: repeatUntil,
+    repeatCount: repeatCount
+  };
+}
+
+function normalizeDueFields(input) {
+  const dueDate = input.dueDate || '';
+  const dueTime = input.dueTime || '';
+  const timezone = input.timezone || input.tz || getDefaultTimeZone();
+  const dueAtISO = dueDate ? parseUserDateTime(dueDate, dueTime, timezone) : '';
+  return { dueDate: dueDate, dueTime: dueTime, timezone: timezone, dueAtISO: dueAtISO };
+}
+
+function normalizeHabitSchedule(input) {
+  const scheduledTime = input.scheduledTime || input.time || '';
+  const timeWindow = input.timeWindow || '';
+  const timezone = input.timezone || input.tz || getDefaultTimeZone();
+  return { scheduledTime: scheduledTime, timeWindow: timeWindow, timezone: timezone };
+}
+
+
+function ensureSheetColumns(sheetName, requiredHeaders) {
+  const ss = getOrCreateSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return;
+  const lastCol = sheet.getLastColumn();
+  const headerRange = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol) : null;
+  const headers = headerRange ? headerRange.getValues()[0] : [];
+  let changed = false;
+
+  requiredHeaders.forEach(header => {
+    if (headers.indexOf(header) === -1) {
+      headers.push(header);
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#4285f4').setFontColor('#ffffff');
+    sheet.setFrozenRows(1);
+  }
+}
+
 
 function ping() {
   return safeExecute('ping', () => {
@@ -268,18 +359,21 @@ function getOrCreateSpreadsheet() {
   }
 }
 
+
+
 function initializeDatabase() {
   const ss = getOrCreateSpreadsheet();
 
   const sheets = {
     'USERS': ['userKey', 'email', 'createdAt'],
-    'HABITS': ['id', 'userKey', 'name', 'category', 'color', 'icon', 'frequencyJson', 'goalPerDay', 'reminderTime', 'active', 'createdAt', 'updatedAt'],
-    'HABIT_LOG': ['id', 'habitId', 'userKey', 'date', 'completed', 'createdAt'],
-    'TASKS': ['id', 'userKey', 'title', 'description', 'priority', 'dueDate', 'dueTime', 'status', 'tagsJson', 'calendarEventId', 'calendarUpdatedAt', 'isRecurring', 'recurrenceType', 'recurrenceDays', 'recurrenceTime', 'recurrenceStartDate', 'recurrenceEndDate', 'recurrenceNextRun', 'templateTaskId', 'createdAt', 'updatedAt'],
-    'TASK_CHECKLIST': ['id', 'taskId', 'userKey', 'text', 'done', 'createdAt'],
-    'GOALS': ['id', 'userKey', 'title', 'metric', 'targetValue', 'currentValue', 'dueDate', 'status', 'createdAt', 'updatedAt'],
+    'HABITS': ['id', 'userKey', 'name', 'description', 'category', 'color', 'icon', 'frequencyJson', 'goalPerDay', 'reminderTime', 'timeWindow', 'scheduledTime', 'timezone', 'repeatEnabled', 'repeatType', 'repeatInterval', 'repeatWeekdays', 'repeatMonthday', 'repeatEnd', 'repeatUntil', 'repeatCount', 'nextOccurrence', 'orderIndex', 'tagsJson', 'active', 'createdAt', 'updatedAt'],
+    'HABIT_LOG': ['id', 'habitId', 'userKey', 'date', 'completed', 'completedAtISO', 'createdAt'],
+    'TASKS': ['id', 'userKey', 'title', 'description', 'priority', 'dueDate', 'dueTime', 'timezone', 'dueAtISO', 'status', 'tagsJson', 'calendarEventId', 'calendarUpdatedAt', 'repeatEnabled', 'repeatType', 'repeatInterval', 'repeatWeekdays', 'repeatMonthday', 'repeatEnd', 'repeatUntil', 'repeatCount', 'nextOccurrence', 'isRecurring', 'recurrenceType', 'recurrenceDays', 'recurrenceTime', 'recurrenceStartDate', 'recurrenceEndDate', 'recurrenceNextRun', 'templateTaskId', 'createdAt', 'updatedAt'],
+    'TASK_CHECKLIST': ['id', 'taskId', 'userKey', 'text', 'done', 'orderIndex', 'createdAt'],
+    'GOALS': ['id', 'userKey', 'title', 'metric', 'unit', 'targetValue', 'currentValue', 'dueDate', 'dueTime', 'timezone', 'dueAtISO', 'status', 'linkedHabitIdsJson', 'linkedTaskIdsJson', 'createdAt', 'updatedAt'],
     'GOAL_LOG': ['id', 'goalId', 'userKey', 'deltaValue', 'note', 'date', 'createdAt'],
-    'JOURNAL': ['id', 'userKey', 'date', 'mood', 'energy', 'note', 'gratitude', 'createdAt', 'updatedAt']
+    'JOURNAL': ['id', 'userKey', 'date', 'mood', 'energy', 'note', 'gratitude', 'createdAt', 'updatedAt'],
+    'FOCUS_LOG': ['id', 'userKey', 'taskId', 'startedAt', 'endedAt', 'durationMinutes', 'createdAt']
   };
 
   Object.keys(sheets).forEach(sheetName => {
@@ -292,6 +386,25 @@ function initializeDatabase() {
     }
   });
 }
+
+const REQUIRED_HEADERS = {
+  HABITS: ['id', 'userKey', 'name', 'description', 'category', 'color', 'icon', 'frequencyJson', 'goalPerDay', 'reminderTime', 'timeWindow', 'scheduledTime', 'timezone', 'repeatEnabled', 'repeatType', 'repeatInterval', 'repeatWeekdays', 'repeatMonthday', 'repeatEnd', 'repeatUntil', 'repeatCount', 'nextOccurrence', 'orderIndex', 'tagsJson', 'active', 'createdAt', 'updatedAt'],
+  HABIT_LOG: ['id', 'habitId', 'userKey', 'date', 'completed', 'completedAtISO', 'createdAt'],
+  TASKS: ['id', 'userKey', 'title', 'description', 'priority', 'dueDate', 'dueTime', 'timezone', 'dueAtISO', 'status', 'tagsJson', 'calendarEventId', 'calendarUpdatedAt', 'repeatEnabled', 'repeatType', 'repeatInterval', 'repeatWeekdays', 'repeatMonthday', 'repeatEnd', 'repeatUntil', 'repeatCount', 'nextOccurrence', 'isRecurring', 'recurrenceType', 'recurrenceDays', 'recurrenceTime', 'recurrenceStartDate', 'recurrenceEndDate', 'recurrenceNextRun', 'templateTaskId', 'createdAt', 'updatedAt'],
+  TASK_CHECKLIST: ['id', 'taskId', 'userKey', 'text', 'done', 'orderIndex', 'createdAt'],
+  GOALS: ['id', 'userKey', 'title', 'metric', 'unit', 'targetValue', 'currentValue', 'dueDate', 'dueTime', 'timezone', 'dueAtISO', 'status', 'linkedHabitIdsJson', 'linkedTaskIdsJson', 'createdAt', 'updatedAt'],
+  FOCUS_LOG: ['id', 'userKey', 'taskId', 'startedAt', 'endedAt', 'durationMinutes', 'createdAt']
+};
+
+function ensureCoreSchema() {
+  ensureSheetColumns('HABITS', REQUIRED_HEADERS.HABITS);
+  ensureSheetColumns('HABIT_LOG', REQUIRED_HEADERS.HABIT_LOG);
+  ensureSheetColumns('TASKS', REQUIRED_HEADERS.TASKS);
+  ensureSheetColumns('TASK_CHECKLIST', REQUIRED_HEADERS.TASK_CHECKLIST);
+  ensureSheetColumns('GOALS', REQUIRED_HEADERS.GOALS);
+  ensureSheetColumns('FOCUS_LOG', REQUIRED_HEADERS.FOCUS_LOG);
+}
+
 
 function getUserKey() {
   try {
@@ -587,6 +700,8 @@ function initApp(providedUserKey) {
       });
     }
 
+    ensureCoreSchema();
+
     // Gerar tarefas recorrentes (silenciosamente, sem bloquear)
     try {
       generateRecurringTasks(userKey, { daysAhead: 14 });
@@ -610,17 +725,38 @@ function initApp(providedUserKey) {
 
 function createHabit(userKey, habitData) {
   try {
+    ensureSheetColumns('HABITS', REQUIRED_HEADERS.HABITS);
+    const input = habitData || {};
+    const repeat = normalizeRepeatInput(input);
+    const schedule = normalizeHabitSchedule(input);
+    const nextOccurrence = repeat.repeatEnabled ? computeNextOccurrence(repeat, new Date().toISOString()) : '';
+
     const habit = {
       id: Utilities.getUuid(),
       userKey: userKey,
-      name: habitData.name || '',
-      category: habitData.category || 'other',
-      color: habitData.color || '#4285f4',
-      icon: habitData.icon || 'check_circle',
-      frequencyJson: JSON.stringify(habitData.frequency || { type: 'daily' }),
-      goalPerDay: habitData.goalPerDay || 1,
-      reminderTime: habitData.reminderTime || '',
-      active: habitData.active !== false,
+      name: input.name || '',
+      description: input.description || '',
+      category: input.category || 'other',
+      color: input.color || '#4285f4',
+      icon: input.icon || 'check_circle',
+      frequencyJson: JSON.stringify(input.frequency || { type: 'daily' }),
+      goalPerDay: input.goalPerDay || 1,
+      reminderTime: input.reminderTime || '',
+      timeWindow: schedule.timeWindow,
+      scheduledTime: schedule.scheduledTime,
+      timezone: schedule.timezone,
+      repeatEnabled: repeat.repeatEnabled,
+      repeatType: repeat.repeatType,
+      repeatInterval: repeat.repeatInterval,
+      repeatWeekdays: JSON.stringify(repeat.repeatWeekdays),
+      repeatMonthday: repeat.repeatMonthday,
+      repeatEnd: repeat.repeatEnd,
+      repeatUntil: repeat.repeatUntil,
+      repeatCount: repeat.repeatCount,
+      nextOccurrence: nextOccurrence,
+      orderIndex: input.orderIndex || '',
+      tagsJson: JSON.stringify(input.tags || []),
+      active: input.active !== false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -634,23 +770,43 @@ function createHabit(userKey, habitData) {
 
 function updateHabit(userKey, habitId, updates) {
   try {
+    ensureSheetColumns('HABITS', REQUIRED_HEADERS.HABITS);
     const habits = findRecords('HABITS', { id: habitId, userKey: userKey });
     if (habits.length === 0) {
       return { ok: false, error: 'Habit not found' };
     }
 
+    const merged = Object.assign({}, habits[0], updates || {});
+    const repeat = normalizeRepeatInput(merged);
+    const schedule = normalizeHabitSchedule(merged);
+    const nextOccurrence = repeat.repeatEnabled ? computeNextOccurrence(repeat, new Date().toISOString()) : '';
+
     const updateData = {
+      name: merged.name || '',
+      description: merged.description || '',
+      category: merged.category || 'other',
+      color: merged.color || '#4285f4',
+      icon: merged.icon || 'check_circle',
+      frequencyJson: merged.frequency ? JSON.stringify(merged.frequency) : merged.frequencyJson || JSON.stringify({ type: 'daily' }),
+      goalPerDay: merged.goalPerDay || 1,
+      reminderTime: merged.reminderTime || '',
+      timeWindow: schedule.timeWindow,
+      scheduledTime: schedule.scheduledTime,
+      timezone: schedule.timezone,
+      repeatEnabled: repeat.repeatEnabled,
+      repeatType: repeat.repeatType,
+      repeatInterval: repeat.repeatInterval,
+      repeatWeekdays: JSON.stringify(repeat.repeatWeekdays),
+      repeatMonthday: repeat.repeatMonthday,
+      repeatEnd: repeat.repeatEnd,
+      repeatUntil: repeat.repeatUntil,
+      repeatCount: repeat.repeatCount,
+      nextOccurrence: nextOccurrence,
+      orderIndex: merged.orderIndex || '',
+      tagsJson: merged.tags ? JSON.stringify(merged.tags) : (merged.tagsJson || '[]'),
+      active: merged.active !== false,
       updatedAt: new Date().toISOString()
     };
-
-    if (updates.name) updateData.name = updates.name;
-    if (updates.category) updateData.category = updates.category;
-    if (updates.color) updateData.color = updates.color;
-    if (updates.icon) updateData.icon = updates.icon;
-    if (updates.frequency) updateData.frequencyJson = JSON.stringify(updates.frequency);
-    if (updates.goalPerDay) updateData.goalPerDay = updates.goalPerDay;
-    if (updates.reminderTime !== undefined) updateData.reminderTime = updates.reminderTime;
-    if (updates.active !== undefined) updateData.active = updates.active;
 
     updateRecord('HABITS', habitId, updateData);
     return { ok: true, data: getAppStateSafe(userKey) };
@@ -659,7 +815,7 @@ function updateHabit(userKey, habitId, updates) {
   }
 }
 
-function deleteHabit(userKey, habitId) {
+function deleteHabit(userKey, habitId) {(userKey, habitId) {
   try {
     const habits = findRecords('HABITS', { id: habitId, userKey: userKey });
     if (habits.length === 0) {
@@ -679,6 +835,7 @@ function deleteHabit(userKey, habitId) {
 
 function toggleHabitCompletion(userKey, habitId, date) {
   try {
+    ensureSheetColumns('HABIT_LOG', REQUIRED_HEADERS.HABIT_LOG);
     const habits = findRecords('HABITS', { id: habitId, userKey: userKey });
     if (habits.length === 0) {
       return { ok: false, error: 'Habit not found' };
@@ -688,7 +845,7 @@ function toggleHabitCompletion(userKey, habitId, date) {
 
     if (logs.length > 0) {
       const newStatus = !logs[0].completed;
-      updateRecord('HABIT_LOG', logs[0].id, { completed: newStatus });
+      updateRecord('HABIT_LOG', logs[0].id, { completed: newStatus, completedAtISO: newStatus ? new Date().toISOString() : '' });
       return { ok: true, data: getAppStateSafe(userKey) };
     } else {
       const log = {
@@ -697,6 +854,7 @@ function toggleHabitCompletion(userKey, habitId, date) {
         userKey: userKey,
         date: date,
         completed: true,
+        completedAtISO: new Date().toISOString(),
         createdAt: new Date().toISOString()
       };
       createRecord('HABIT_LOG', log);
@@ -713,25 +871,42 @@ function toggleHabitCompletion(userKey, habitId, date) {
 
 function createTask(userKey, taskData) {
   try {
+    ensureSheetColumns('TASKS', REQUIRED_HEADERS.TASKS);
+    const input = taskData || {};
+    const due = normalizeDueFields(input);
+    const repeat = normalizeRepeatInput(input);
+    const nextOccurrence = repeat.repeatEnabled ? computeNextOccurrence(repeat, due.dueDate || new Date().toISOString()) : '';
+
     const task = {
       id: Utilities.getUuid(),
       userKey: userKey,
-      title: taskData.title || '',
-      description: taskData.description || '',
-      priority: taskData.priority || 'medium',
-      dueDate: taskData.dueDate || '',
-      dueTime: taskData.dueTime || '',
-      status: taskData.status || 'open',
-      tagsJson: JSON.stringify(taskData.tags || []),
+      title: input.title || input.name || '',
+      description: input.description || '',
+      priority: input.priority || 'medium',
+      dueDate: due.dueDate,
+      dueTime: due.dueTime,
+      timezone: due.timezone,
+      dueAtISO: due.dueAtISO,
+      status: input.status || 'open',
+      tagsJson: JSON.stringify(input.tags || []),
       calendarEventId: '',
       calendarUpdatedAt: '',
-      isRecurring: taskData.isRecurring || false,
-      recurrenceType: taskData.recurrenceType || '',
-      recurrenceDays: taskData.recurrenceDays ? JSON.stringify(taskData.recurrenceDays) : '',
-      recurrenceTime: taskData.recurrenceTime || '',
-      recurrenceStartDate: taskData.recurrenceStartDate || '',
-      recurrenceEndDate: taskData.recurrenceEndDate || '',
-      recurrenceNextRun: '',
+      repeatEnabled: repeat.repeatEnabled,
+      repeatType: repeat.repeatType,
+      repeatInterval: repeat.repeatInterval,
+      repeatWeekdays: JSON.stringify(repeat.repeatWeekdays),
+      repeatMonthday: repeat.repeatMonthday,
+      repeatEnd: repeat.repeatEnd,
+      repeatUntil: repeat.repeatUntil,
+      repeatCount: repeat.repeatCount,
+      nextOccurrence: nextOccurrence,
+      isRecurring: repeat.repeatEnabled || input.isRecurring || false,
+      recurrenceType: input.recurrenceType || repeat.repeatType || '',
+      recurrenceDays: JSON.stringify(normalizeWeekdays(input.recurrenceDays || repeat.repeatWeekdays)),
+      recurrenceTime: input.recurrenceTime || due.dueTime || '',
+      recurrenceStartDate: input.recurrenceStartDate || due.dueDate || '',
+      recurrenceEndDate: input.recurrenceEndDate || repeat.repeatUntil || '',
+      recurrenceNextRun: nextOccurrence,
       templateTaskId: '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -739,7 +914,6 @@ function createTask(userKey, taskData) {
 
     createRecord('TASKS', task);
 
-    // Se for recorrente, gerar instâncias
     if (task.isRecurring) {
       generateRecurringTasks(userKey, { daysAhead: 30 });
     }
@@ -752,33 +926,49 @@ function createTask(userKey, taskData) {
 
 function updateTask(userKey, taskId, updates) {
   try {
+    ensureSheetColumns('TASKS', REQUIRED_HEADERS.TASKS);
     const tasks = findRecords('TASKS', { id: taskId, userKey: userKey });
     if (tasks.length === 0) {
       return { ok: false, error: 'Task not found' };
     }
 
+    const merged = Object.assign({}, tasks[0], updates || {});
+    const due = normalizeDueFields(merged);
+    const repeat = normalizeRepeatInput(merged);
+    const nextOccurrence = repeat.repeatEnabled ? computeNextOccurrence(repeat, due.dueDate || new Date().toISOString()) : '';
+
     const updateData = {
+      title: merged.title || merged.name || '',
+      description: merged.description || '',
+      priority: merged.priority || 'medium',
+      dueDate: due.dueDate,
+      dueTime: due.dueTime,
+      timezone: due.timezone,
+      dueAtISO: due.dueAtISO,
+      status: merged.status || 'open',
+      tagsJson: merged.tags ? JSON.stringify(merged.tags) : (merged.tagsJson || '[]'),
+      repeatEnabled: repeat.repeatEnabled,
+      repeatType: repeat.repeatType,
+      repeatInterval: repeat.repeatInterval,
+      repeatWeekdays: JSON.stringify(repeat.repeatWeekdays),
+      repeatMonthday: repeat.repeatMonthday,
+      repeatEnd: repeat.repeatEnd,
+      repeatUntil: repeat.repeatUntil,
+      repeatCount: repeat.repeatCount,
+      nextOccurrence: nextOccurrence,
+      isRecurring: repeat.repeatEnabled || merged.isRecurring || false,
+      recurrenceType: merged.recurrenceType || repeat.repeatType || '',
+      recurrenceDays: JSON.stringify(normalizeWeekdays(merged.recurrenceDays || repeat.repeatWeekdays)),
+      recurrenceTime: merged.recurrenceTime || due.dueTime || '',
+      recurrenceStartDate: merged.recurrenceStartDate || due.dueDate || '',
+      recurrenceEndDate: merged.recurrenceEndDate || repeat.repeatUntil || '',
+      recurrenceNextRun: nextOccurrence,
       updatedAt: new Date().toISOString()
     };
 
-    if (updates.title) updateData.title = updates.title;
-    if (updates.description !== undefined) updateData.description = updates.description;
-    if (updates.priority) updateData.priority = updates.priority;
-    if (updates.dueDate !== undefined) updateData.dueDate = updates.dueDate;
-    if (updates.dueTime !== undefined) updateData.dueTime = updates.dueTime;
-    if (updates.status) updateData.status = updates.status;
-    if (updates.tags) updateData.tagsJson = JSON.stringify(updates.tags);
-    if (updates.isRecurring !== undefined) updateData.isRecurring = updates.isRecurring;
-    if (updates.recurrenceType) updateData.recurrenceType = updates.recurrenceType;
-    if (updates.recurrenceDays) updateData.recurrenceDays = JSON.stringify(updates.recurrenceDays);
-    if (updates.recurrenceTime !== undefined) updateData.recurrenceTime = updates.recurrenceTime;
-    if (updates.recurrenceStartDate !== undefined) updateData.recurrenceStartDate = updates.recurrenceStartDate;
-    if (updates.recurrenceEndDate !== undefined) updateData.recurrenceEndDate = updates.recurrenceEndDate;
-
     updateRecord('TASKS', taskId, updateData);
 
-    // Se alterou recorrência, regerar instâncias
-    if (updates.isRecurring || updates.recurrenceDays || updates.recurrenceTime) {
+    if (updateData.isRecurring) {
       generateRecurringTasks(userKey, { daysAhead: 30 });
     }
 
@@ -788,7 +978,7 @@ function updateTask(userKey, taskId, updates) {
   }
 }
 
-function deleteTask(userKey, taskId) {
+function deleteTask(userKey, taskId) {(userKey, taskId) {
   try {
     const tasks = findRecords('TASKS', { id: taskId, userKey: userKey });
     if (tasks.length === 0) {
@@ -820,6 +1010,7 @@ function setTaskStatus(userKey, taskId, status) {
 
 function addChecklistItem(userKey, taskId, text) {
   try {
+    ensureSheetColumns('TASK_CHECKLIST', REQUIRED_HEADERS.TASK_CHECKLIST);
     const tasks = findRecords('TASKS', { id: taskId, userKey: userKey });
     if (tasks.length === 0) {
       return { ok: false, error: 'Task not found' };
@@ -876,15 +1067,26 @@ function deleteChecklistItem(userKey, itemId) {
 
 function createGoal(userKey, goalData) {
   try {
+    ensureSheetColumns('GOALS', REQUIRED_HEADERS.GOALS);
+  ensureSheetColumns('FOCUS_LOG', REQUIRED_HEADERS.FOCUS_LOG);
+    const input = goalData || {};
+    const due = normalizeDueFields(input);
+
     const goal = {
       id: Utilities.getUuid(),
       userKey: userKey,
-      title: goalData.title || '',
-      metric: goalData.metric || '',
-      targetValue: goalData.targetValue || 0,
-      currentValue: goalData.currentValue || 0,
-      dueDate: goalData.dueDate || '',
-      status: goalData.status || 'active',
+      title: input.title || input.name || '',
+      metric: input.metric || input.description || '',
+      unit: input.unit || '',
+      targetValue: input.targetValue || 0,
+      currentValue: input.currentValue || 0,
+      dueDate: due.dueDate,
+      dueTime: due.dueTime,
+      timezone: due.timezone,
+      dueAtISO: due.dueAtISO,
+      status: input.status || 'active',
+      linkedHabitIdsJson: JSON.stringify(input.linkedHabitIds || []),
+      linkedTaskIdsJson: JSON.stringify(input.linkedTaskIds || []),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -898,21 +1100,31 @@ function createGoal(userKey, goalData) {
 
 function updateGoal(userKey, goalId, updates) {
   try {
+    ensureSheetColumns('GOALS', REQUIRED_HEADERS.GOALS);
+  ensureSheetColumns('FOCUS_LOG', REQUIRED_HEADERS.FOCUS_LOG);
     const goals = findRecords('GOALS', { id: goalId, userKey: userKey });
     if (goals.length === 0) {
       return { ok: false, error: 'Goal not found' };
     }
 
+    const merged = Object.assign({}, goals[0], updates || {});
+    const due = normalizeDueFields(merged);
+
     const updateData = {
+      title: merged.title || merged.name || '',
+      metric: merged.metric || merged.description || '',
+      unit: merged.unit || '',
+      targetValue: merged.targetValue || 0,
+      currentValue: merged.currentValue || 0,
+      dueDate: due.dueDate,
+      dueTime: due.dueTime,
+      timezone: due.timezone,
+      dueAtISO: due.dueAtISO,
+      status: merged.status || 'active',
+      linkedHabitIdsJson: merged.linkedHabitIds ? JSON.stringify(merged.linkedHabitIds) : (merged.linkedHabitIdsJson || '[]'),
+      linkedTaskIdsJson: merged.linkedTaskIds ? JSON.stringify(merged.linkedTaskIds) : (merged.linkedTaskIdsJson || '[]'),
       updatedAt: new Date().toISOString()
     };
-
-    if (updates.title) updateData.title = updates.title;
-    if (updates.metric) updateData.metric = updates.metric;
-    if (updates.targetValue !== undefined) updateData.targetValue = updates.targetValue;
-    if (updates.currentValue !== undefined) updateData.currentValue = updates.currentValue;
-    if (updates.dueDate !== undefined) updateData.dueDate = updates.dueDate;
-    if (updates.status) updateData.status = updates.status;
 
     updateRecord('GOALS', goalId, updateData);
     return { ok: true, data: getAppStateSafe(userKey) };
@@ -921,7 +1133,7 @@ function updateGoal(userKey, goalId, updates) {
   }
 }
 
-function deleteGoal(userKey, goalId) {
+function deleteGoal(userKey, goalId) {(userKey, goalId) {
   try {
     const goals = findRecords('GOALS', { id: goalId, userKey: userKey });
     if (goals.length === 0) {
@@ -1023,6 +1235,22 @@ function listJournalEntries(userKey, range) {
   }
 }
 
+function logFocusSession(userKey, taskId, startedAt, endedAt, durationMinutes) {
+  return safeExecute('logFocusSession', () => {
+    ensureSheetColumns('FOCUS_LOG', REQUIRED_HEADERS.FOCUS_LOG);
+    const entry = {
+      id: Utilities.getUuid(),
+      userKey: userKey,
+      taskId: taskId || '',
+      startedAt: startedAt || new Date().toISOString(),
+      endedAt: endedAt || new Date().toISOString(),
+      durationMinutes: durationMinutes || 0,
+      createdAt: new Date().toISOString()
+    };
+    createRecord('FOCUS_LOG', entry);
+    return { ok: true, data: entry };
+  });
+}
 // ============================================
 // EXPORT
 // ============================================
