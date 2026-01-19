@@ -906,6 +906,7 @@ function getAppState(userKey) {
     taskChecklists: findRecords('TASK_CHECKLIST', { userKey: userKey }) || [],
     goals: findRecords('GOALS', { userKey: userKey }) || [],
     goalLogs: findRecords('GOAL_LOG', { userKey: userKey }) || [],
+    focusLogs: findRecords('FOCUS_LOG', { userKey: userKey }) || [],
     journals: findRecords('JOURNAL', { userKey: userKey }) || []
   };
 }
@@ -2315,13 +2316,44 @@ function syncAll() {
     // 1. Sincronizar da VIEW para Sheet
     const sheetResult = syncClickUpViewToSheet();
     if (!sheetResult.ok) {
+      PropertiesService.getScriptProperties().setProperty('LAST_CLICKUP_SYNC', JSON.stringify({
+        timestamp: new Date().toISOString(),
+        success: false,
+        stage: 'sheet',
+        error: sheetResult.error || 'Erro ao sincronizar Sheet',
+        summary: {
+          fetched: sheetResult.fetched || 0,
+          upserted: sheetResult.upserted || 0,
+          inserted: sheetResult.inserted || 0,
+          updated: sheetResult.updated || 0,
+          outOfView: sheetResult.outOfView || 0,
+          duration: new Date() - startTime
+        }
+      }));
       return sheetResult;
     }
 
     // 2. Sincronizar do Sheet para Rotinas Internas
     const routineResult = syncClickUpToRoutine();
     if (!routineResult.ok) {
-      return { ...sheetResult, routineError: routineResult.error };
+      PropertiesService.getScriptProperties().setProperty('LAST_CLICKUP_SYNC', JSON.stringify({
+        timestamp: new Date().toISOString(),
+        success: false,
+        stage: 'routine',
+        error: routineResult.error || 'Erro ao sincronizar Rotinas',
+        summary: {
+          fetched: sheetResult.fetched || 0,
+          upserted: sheetResult.upserted || 0,
+          inserted: sheetResult.inserted || 0,
+          updated: sheetResult.updated || 0,
+          outOfView: sheetResult.outOfView || 0,
+          synced: routineResult.synced || 0,
+          skipped: routineResult.skipped || 0,
+          errors: routineResult.errors || 0,
+          duration: new Date() - startTime
+        }
+      }));
+      return { ok: false, error: routineResult.error || 'Erro ao sincronizar Rotinas', sheet: sheetResult, routine: routineResult };
     }
 
     const totalDuration = new Date() - startTime;
@@ -2342,7 +2374,13 @@ function syncAll() {
       success: true,
       summary: {
         fetched: sheetResult.fetched,
+        upserted: sheetResult.upserted,
+        inserted: sheetResult.inserted,
+        updated: sheetResult.updated,
+        outOfView: sheetResult.outOfView,
         synced: routineResult.synced,
+        skipped: routineResult.skipped,
+        errors: routineResult.errors,
         duration: totalDuration
       }
     }));
@@ -2356,6 +2394,7 @@ function syncAll() {
     PropertiesService.getScriptProperties().setProperty('LAST_CLICKUP_SYNC', JSON.stringify({
       timestamp: new Date().toISOString(),
       success: false,
+      stage: 'syncAll',
       error: error.toString()
     }));
 
@@ -2370,6 +2409,21 @@ function syncClickUpNow() {
   return safeExecute('syncClickUpNow', () => {
     return syncAll();
   });
+}
+/**
+ * Alias para compatibilidade com frontend antigo
+ */
+function syncClickUp(userKey) {
+  return safeExecute('syncClickUp', () => {
+    return syncAll();
+  });
+}
+
+/**
+ * Alias para status do ClickUp (compatibilidade)
+ */
+function getClickUpStatus(userKey) {
+  return getLastSyncStatus();
 }
 
 /**
@@ -2397,6 +2451,16 @@ function listClickUpTasks(options) {
     const opts = options || {};
     const query = String(opts.query || '').trim().toLowerCase();
     const statusFilter = String(opts.status || 'all').trim().toLowerCase();
+    const priorityFilter = String(opts.priority || 'all').trim().toLowerCase();
+    const assigneeQuery = String(opts.assignee || '').trim().toLowerCase();
+    const dueStart = String(opts.dueStart || '').trim();
+    const dueEnd = String(opts.dueEnd || '').trim();
+    const updatedStart = String(opts.updatedStart || '').trim();
+    const updatedEnd = String(opts.updatedEnd || '').trim();
+    const onlyMine = opts.onlyMine !== false;
+    const onlyUnassigned = opts.onlyUnassigned === true;
+    const sortBy = String(opts.sortBy || 'updated').trim().toLowerCase();
+    const sortDir = String(opts.sortDir || 'desc').trim().toLowerCase();
     const page = Math.max(1, parseInt(opts.page, 10) || 1);
     const pageSize = Math.max(1, parseInt(opts.pageSize, 10) || 25);
     const includeForaDaView = !!opts.includeForaDaView;
@@ -2445,6 +2509,34 @@ function listClickUpTasks(options) {
       return typeof value === 'string' && value.indexOf('@') !== -1;
     }
 
+    function parseDateValue(value) {
+      if (!value) return null;
+      if (typeof value === 'number' || /^\d+$/.test(String(value))) {
+        const ms = parseInt(value, 10);
+        return isNaN(ms) ? null : new Date(ms);
+      }
+      const parsed = new Date(value);
+      if (isNaN(parsed)) return null;
+      return parsed;
+    }
+
+    function parseDateStart(dateStr) {
+      if (!dateStr) return null;
+      const parsed = new Date(dateStr + 'T00:00:00');
+      return isNaN(parsed) ? null : parsed;
+    }
+
+    function parseDateEnd(dateStr) {
+      if (!dateStr) return null;
+      const parsed = new Date(dateStr + 'T23:59:59');
+      return isNaN(parsed) ? null : parsed;
+    }
+
+    const dueStartDate = parseDateStart(dueStart);
+    const dueEndDate = parseDateEnd(dueEnd);
+    const updatedStartDate = parseDateStart(updatedStart);
+    const updatedEndDate = parseDateEnd(updatedEnd);
+
     function matchesStatus(rowStatus) {
       if (!statusFilter || statusFilter === 'all') return true;
       const status = String(rowStatus || '').toLowerCase();
@@ -2477,15 +2569,64 @@ function listClickUpTasks(options) {
         continue;
       }
 
-      if (currentUserEmail) {
-        let responsavelEmail = String(record.responsavel_email || '').trim().toLowerCase();
-        const responsavelPrincipal = String(record.responsavel_principal || '').trim();
-        if (!responsavelEmail && isEmailLike(responsavelPrincipal)) {
-          responsavelEmail = responsavelPrincipal.toLowerCase();
-        } else if (!responsavelEmail && responsavelPrincipal) {
-          responsavelEmail = mappingByUsername[responsavelPrincipal.toLowerCase()] || '';
-        }
+      let responsavelEmail = String(record.responsavel_email || '').trim().toLowerCase();
+      const responsavelPrincipal = String(record.responsavel_principal || '').trim();
+      const assigneesValue = String(record.assignees || '').trim();
+
+      if (!responsavelEmail && isEmailLike(responsavelPrincipal)) {
+        responsavelEmail = responsavelPrincipal.toLowerCase();
+      } else if (!responsavelEmail && responsavelPrincipal) {
+        responsavelEmail = mappingByUsername[responsavelPrincipal.toLowerCase()] || '';
+      }
+
+      if (onlyMine && currentUserEmail) {
         if (!responsavelEmail || responsavelEmail !== currentUserEmail) {
+          continue;
+        }
+      }
+
+      if (onlyUnassigned) {
+        if (responsavelEmail || responsavelPrincipal || assigneesValue) {
+          continue;
+        }
+      }
+
+      if (priorityFilter && priorityFilter !== 'all') {
+        const priorityValue = String(record.priority || '').toLowerCase();
+        if (!priorityValue || !priorityValue.includes(priorityFilter)) {
+          continue;
+        }
+      }
+
+      if (assigneeQuery) {
+        const assigneeHaystack = [responsavelPrincipal, responsavelEmail, assigneesValue].join(' ').toLowerCase();
+        if (!assigneeHaystack.includes(assigneeQuery)) {
+          continue;
+        }
+      }
+
+      if (dueStartDate || dueEndDate) {
+        const dueDateValue = parseDateValue(record.due_date);
+        if (!dueDateValue) {
+          continue;
+        }
+        if (dueStartDate && dueDateValue < dueStartDate) {
+          continue;
+        }
+        if (dueEndDate && dueDateValue > dueEndDate) {
+          continue;
+        }
+      }
+
+      if (updatedStartDate || updatedEndDate) {
+        const updatedValue = parseDateValue(record.date_updated);
+        if (!updatedValue) {
+          continue;
+        }
+        if (updatedStartDate && updatedValue < updatedStartDate) {
+          continue;
+        }
+        if (updatedEndDate && updatedValue > updatedEndDate) {
           continue;
         }
       }
@@ -2497,7 +2638,8 @@ function listClickUpTasks(options) {
           record.responsavel_email,
           record.status,
           record.priority,
-          record.assignees
+          record.assignees,
+          record.tags
         ].join(' ').toLowerCase();
         if (!haystack.includes(query)) {
           continue;
@@ -2507,10 +2649,32 @@ function listClickUpTasks(options) {
       filtered.push(record);
     }
 
+    function priorityRank(value) {
+      const v = String(value || '').toLowerCase();
+      if (v.includes('urgent')) return 4;
+      if (v.includes('high')) return 3;
+      if (v.includes('normal') || v.includes('medium')) return 2;
+      if (v.includes('low')) return 1;
+      return 0;
+    }
+
     filtered.sort((a, b) => {
-      const aVal = parseInt(a.date_updated, 10) || Date.parse(a.date_updated) || 0;
-      const bVal = parseInt(b.date_updated, 10) || Date.parse(b.date_updated) || 0;
-      return bVal - aVal;
+      let aVal = 0;
+      let bVal = 0;
+
+      if (sortBy === 'due') {
+        aVal = parseDateValue(a.due_date) ? parseDateValue(a.due_date).getTime() : 0;
+        bVal = parseDateValue(b.due_date) ? parseDateValue(b.due_date).getTime() : 0;
+      } else if (sortBy === 'priority') {
+        aVal = priorityRank(a.priority);
+        bVal = priorityRank(b.priority);
+      } else {
+        aVal = parseDateValue(a.date_updated) ? parseDateValue(a.date_updated).getTime() : 0;
+        bVal = parseDateValue(b.date_updated) ? parseDateValue(b.date_updated).getTime() : 0;
+      }
+
+      const diff = aVal - bVal;
+      return sortDir === 'asc' ? diff : -diff;
     });
 
     const total = filtered.length;
@@ -2523,6 +2687,8 @@ function listClickUpTasks(options) {
       name: record.name,
       status: record.status,
       priority: record.priority,
+      tags: record.tags,
+      assignees: record.assignees,
       responsavel_principal: record.responsavel_principal,
       responsavel_email: record.responsavel_email,
       due_date: record.due_date,
@@ -2583,7 +2749,6 @@ function removeClickUpTrigger() {
     return { ok: false, error: error.toString() };
   }
 }
-
 
 
 

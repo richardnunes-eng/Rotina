@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
@@ -31,10 +31,19 @@
         </button>
       </div>
       
-            <nav class="sidebar-nav">
+      <nav class="sidebar-nav">
         <a href="#dashboard" class="nav-item active" data-view="dashboard">
           <span class="material-icons">dashboard</span>
           <span>Dashboard</span>
+        </a>
+        <a href="#reports" class="nav-item" data-view="reports">
+          <span class="material-icons">insights</span>
+          <span>Relatorios</span>
+        </a>
+        <a href="#notifications" class="nav-item" data-view="notifications">
+          <span class="material-icons">notifications</span>
+          <span>Notificacoes</span>
+          <span class="nav-badge" id="notifications-count" style="display: none;"></span>
         </a>
         <a href="#habits" class="nav-item" data-view="habits">
           <span class="material-icons">check_circle</span>
@@ -82,16 +91,25 @@
 </div>
 </aside>
 
-    <!-- Conte�do principal -->
+    <!-- Conteúdo principal -->
     <main class="main-content">
       <div id="view-container"></div>
     </main>
 
     <!-- Bottom Navigation (Mobile) -->
-        <nav class="bottom-nav" id="bottom-nav">
+    <nav class="bottom-nav" id="bottom-nav">
       <a href="#dashboard" class="nav-item active" data-view="dashboard">
         <span class="material-icons">dashboard</span>
         <span>Dashboard</span>
+      </a>
+      <a href="#notifications" class="nav-item" data-view="notifications">
+        <span class="material-icons">notifications</span>
+        <span>Notificacoes</span>
+        <span class="nav-badge" id="notifications-count-mobile" style="display: none;"></span>
+      </a>
+      <a href="#reports" class="nav-item" data-view="reports">
+        <span class="material-icons">insights</span>
+        <span>Relatorios</span>
       </a>
       <a href="#habits" class="nav-item" data-view="habits">
         <span class="material-icons">check_circle</span>
@@ -129,6 +147,7 @@
   <?!= include('app'); ?>
 </body>
 </html>
+
 
 
 

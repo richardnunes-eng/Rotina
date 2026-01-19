@@ -1,4 +1,4 @@
-<script>
+﻿<script>
 // ============================================
 // ROUTINE APP - Frontend JavaScript
 // ============================================
@@ -44,6 +44,7 @@
     taskChecklists: [],
     goals: [],
     goalLogs: [],
+    focusLogs: [],
     journals: [],
     currentView: 'dashboard',
     isLoading: false,
@@ -61,7 +62,7 @@
     }
   };
 
-  // Cache de performance para otimizar cálculos pesados
+  // Cache de performance para otimizar cÃ¡lculos pesados
   const perfCache = {
     streaks: new Map(),
     heatmapData: null,
@@ -97,6 +98,7 @@
     appState.taskChecklists = Array.isArray(nextState.taskChecklists) ? nextState.taskChecklists : [];
     appState.goals = Array.isArray(nextState.goals) ? nextState.goals : [];
     appState.goalLogs = Array.isArray(nextState.goalLogs) ? nextState.goalLogs : [];
+    appState.focusLogs = Array.isArray(nextState.focusLogs) ? nextState.focusLogs : [];
     appState.journals = Array.isArray(nextState.journals) ? nextState.journals : [];
 
     // Invalidar cache quando os dados mudarem
@@ -109,15 +111,16 @@
     // Invalidar cache de performance
     perfCache.invalidate();
 
-    // Debounce para evitar múltiplas renderizações
+    // Debounce para evitar mÃºltiplas renderizaÃ§Ãµes
     if (refreshTimeout) {
       clearTimeout(refreshTimeout);
     }
 
     refreshTimeout = setTimeout(() => {
-      // Forçar re-renderização da view atual
+      // ForÃ§ar re-renderizaÃ§Ã£o da view atual
       requestAnimationFrame(() => {
         router.render(appState.currentView);
+        notifications.refreshBadge();
       });
       refreshTimeout = null;
     }, 50);
@@ -134,10 +137,10 @@
       return div.innerHTML;
     },
 
-    // Validações
+    // ValidaÃ§Ãµes
     validateRequired: function(value, fieldName) {
       if (!value || String(value).trim() === '') {
-        toast.error(`${fieldName} é obrigatório`);
+        toast.error(`${fieldName} Ã© obrigatÃ³rio`);
         return false;
       }
       return true;
@@ -146,7 +149,7 @@
     validateNumber: function(value, fieldName, min = null, max = null) {
       const num = parseFloat(value);
       if (isNaN(num)) {
-        toast.error(`${fieldName} deve ser um número válido`);
+        toast.error(`${fieldName} deve ser um nÃºmero vÃ¡lido`);
         return false;
       }
       if (min !== null && num < min) {
@@ -164,14 +167,14 @@
       if (!dateStr) return true; // Opcional
       const date = new Date(dateStr);
       if (isNaN(date.getTime())) {
-        toast.error(`${fieldName} inválida`);
+        toast.error(`${fieldName} invÃ¡lida`);
         return false;
       }
       if (!allowPast) {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         if (date < today) {
-          toast.error(`${fieldName} não pode ser no passado`);
+          toast.error(`${fieldName} nÃ£o pode ser no passado`);
           return false;
         }
       }
@@ -182,7 +185,7 @@
       if (!timeStr) return true; // Opcional
       const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
       if (!timeRegex.test(timeStr)) {
-        toast.error(`${fieldName} inválido. Use formato HH:MM`);
+        toast.error(`${fieldName} invÃ¡lido. Use formato HH:MM`);
         return false;
       }
       return true;
@@ -206,7 +209,7 @@
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       const tomorrowISO = tomorrow.toISOString().split('T')[0];
-      if (dateStr === tomorrowISO) return 'Amanhã';
+      if (dateStr === tomorrowISO) return 'AmanhÃ£';
       return this.formatDate(dateStr);
     },
     
@@ -384,6 +387,123 @@
   };
 
   // ============================================
+  // NOTIFICATIONS
+  // ============================================
+
+  const notifications = {
+    getReadMap: function() {
+      return storage.load('notificationsRead') || {};
+    },
+
+    saveReadMap: function(map) {
+      storage.save('notificationsRead', map || {});
+    },
+
+    buildItems: function() {
+      const items = [];
+      const today = utils.getTodayISO();
+      const activeHabits = appState.habits.filter(h => h.active !== false);
+
+      const overdueTasks = appState.tasks.filter(t => t.status !== 'done' && t.dueDate && t.dueDate < today);
+      overdueTasks.forEach(task => {
+        items.push({
+          id: `task-overdue-${task.id}`,
+          type: 'task',
+          title: 'Tarefa atrasada',
+          message: task.title || 'Sem titulo',
+          timestamp: task.dueDate || today,
+          action: { label: 'Ver tarefas', view: 'tasks' }
+        });
+      });
+
+      const dueTodayTasks = appState.tasks.filter(t => t.status !== 'done' && t.dueDate === today);
+      dueTodayTasks.forEach(task => {
+        items.push({
+          id: `task-due-${task.id}`,
+          type: 'task',
+          title: 'Tarefa para hoje',
+          message: task.title || 'Sem titulo',
+          timestamp: task.dueDate || today,
+          action: { label: 'Abrir agenda', view: 'agenda' }
+        });
+      });
+
+      if (activeHabits.length > 0) {
+        const completedIds = new Set(appState.habitLogs.filter(l => l.date === today && l.completed).map(l => l.habitId));
+        const pendingHabits = activeHabits.filter(h => !completedIds.has(h.id));
+        if (pendingHabits.length > 0) {
+          items.push({
+            id: `habit-pending-${today}`,
+            type: 'habit',
+            title: 'Rotinas pendentes hoje',
+            message: `${pendingHabits.length} rotina(s) aguardando`,
+            timestamp: today,
+            action: { label: 'Ver rotinas', view: 'habits' }
+          });
+        }
+      }
+
+      const goalsOverdue = appState.goals.filter(g => g.status !== 'completed' && g.dueDate && g.dueDate < today);
+      goalsOverdue.forEach(goal => {
+        items.push({
+          id: `goal-overdue-${goal.id}`,
+          type: 'goal',
+          title: 'Meta atrasada',
+          message: goal.title || 'Sem titulo',
+          timestamp: goal.dueDate || today,
+          action: { label: 'Ver metas', view: 'goals' }
+        });
+      });
+
+      items.sort((a, b) => {
+        const aVal = new Date(a.timestamp || today).getTime();
+        const bVal = new Date(b.timestamp || today).getTime();
+        return bVal - aVal;
+      });
+
+      return items;
+    },
+
+    isRead: function(id) {
+      const map = this.getReadMap();
+      return !!map[id];
+    },
+
+    markRead: function(id) {
+      const map = this.getReadMap();
+      map[id] = new Date().toISOString();
+      this.saveReadMap(map);
+    },
+
+    markAllRead: function(items) {
+      const map = this.getReadMap();
+      (items || []).forEach(item => {
+        map[item.id] = new Date().toISOString();
+      });
+      this.saveReadMap(map);
+    },
+
+    getUnreadCount: function(items) {
+      const list = items || this.buildItems();
+      return list.filter(item => !this.isRead(item.id)).length;
+    },
+
+    refreshBadge: function(items) {
+      const count = this.getUnreadCount(items);
+      const badge = document.getElementById('notifications-count');
+      const badgeMobile = document.getElementById('notifications-count-mobile');
+      if (badge) {
+        badge.textContent = count;
+        badge.style.display = count > 0 ? 'inline-flex' : 'none';
+      }
+      if (badgeMobile) {
+        badgeMobile.textContent = count;
+        badgeMobile.style.display = count > 0 ? 'inline-flex' : 'none';
+      }
+    }
+  };
+
+  // ============================================
   // MODAL
   // ============================================
 
@@ -447,9 +567,9 @@
       return new Promise((resolve) => {
         try {
           if (typeof google === 'undefined' || !google.script || !google.script.run) {
-            console.error('google.script.run não está disponível');
+            console.error('google.script.run nÃ£o estÃ¡ disponÃ­vel');
             globalLoading.end();
-            resolve({ ok: false, error: 'Ambiente de execução não disponível' });
+            resolve({ ok: false, error: 'Ambiente de execuÃ§Ã£o nÃ£o disponÃ­vel' });
             return;
           }
 
@@ -457,7 +577,7 @@
           const timeoutId = setTimeout(() => {
             console.error('Timeout na chamada:', functionName);
             globalLoading.end();
-            resolve({ ok: false, error: 'A operação demorou muito tempo. Tente novamente.' });
+            resolve({ ok: false, error: 'A operaÃ§Ã£o demorou muito tempo. Tente novamente.' });
           }, 15000);
 
           google.script.run
@@ -465,7 +585,7 @@
               clearTimeout(timeoutId);
               globalLoading.end();
               if (result === null || result === undefined) {
-                resolve({ ok: false, error: 'O servidor retornou uma resposta vazia. Verifique as configurações e tente novamente.' });
+                resolve({ ok: false, error: 'O servidor retornou uma resposta vazia. Verifique as configuraÃ§Ãµes e tente novamente.' });
               } else {
                 resolve(result);
               }
@@ -661,6 +781,12 @@
         case 'focus':
           views.renderFocus(container);
           break;
+        case 'reports':
+          views.renderReports(container);
+          break;
+        case 'notifications':
+          views.renderNotifications(container);
+          break;
         case 'clickup':
           views.renderClickUp(container);
           break;
@@ -681,7 +807,7 @@
     renderDashboard: function(container) {
       const today = utils.getTodayISO();
 
-      // Otimizar: fazer todas as contagens em uma única passagem
+      // Otimizar: fazer todas as contagens em uma Ãºnica passagem
       let completedHabitsToday = 0;
       let totalHabits = 0;
       let activeTasks = 0;
@@ -689,7 +815,7 @@
       let overdue = 0;
       let currentStreak = 0;
 
-      // Processar hábitos
+      // Processar hÃ¡bitos
       appState.habits.forEach(h => {
         if (h.active !== false) {
           totalHabits++;
@@ -845,7 +971,7 @@
         </div>
       `;
 
-      // Renderizar de forma assíncrona para não bloquear a UI
+      // Renderizar de forma assÃ­ncrona para nÃ£o bloquear a UI
       requestAnimationFrame(() => {
         this.renderDashboardHabits();
       });
@@ -1033,7 +1159,7 @@
           <div class="page-header">
             <div class="page-title">
               <h1>Modo Foco</h1>
-              <span>Técnica Pomodoro - 25 minutos de foco total</span>
+              <span>TÃ©cnica Pomodoro - 25 minutos de foco total</span>
             </div>
           </div>
 
@@ -1123,11 +1249,11 @@
               <ul style="list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px;">
                 <li style="display: flex; gap: 8px; color: var(--text-secondary);">
                   <span class="material-icons" style="font-size: 18px; color: var(--accent-blue);">check_circle</span>
-                  Elimine todas as distrações
+                  Elimine todas as distraÃ§Ãµes
                 </li>
                 <li style="display: flex; gap: 8px; color: var(--text-secondary);">
                   <span class="material-icons" style="font-size: 18px; color: var(--accent-blue);">check_circle</span>
-                  Silencie notificações do celular
+                  Silencie notificaÃ§Ãµes do celular
                 </li>
                 <li style="display: flex; gap: 8px; color: var(--text-secondary);">
                   <span class="material-icons" style="font-size: 18px; color: var(--accent-blue);">check_circle</span>
@@ -1135,7 +1261,7 @@
                 </li>
                 <li style="display: flex; gap: 8px; color: var(--text-secondary);">
                   <span class="material-icons" style="font-size: 18px; color: var(--accent-blue);">check_circle</span>
-                  Faça uma pausa após o ciclo
+                  FaÃ§a uma pausa apÃ³s o ciclo
                 </li>
               </ul>
             </div>
@@ -1204,7 +1330,7 @@
           <div class="empty-state">
             <span class="material-icons empty-state-icon">check_circle</span>
             <h3 class="empty-state-title">Nenhuma rotina cadastrada</h3>
-            <p class="empty-state-description">Crie sua primeira rotina para começar!</p>
+            <p class="empty-state-description">Crie sua primeira rotina para comeÃ§ar!</p>
           </div>
         `;
         return;
@@ -1215,7 +1341,7 @@
         const log = appState.habitLogs.find(l => l.habitId === habit.id && l.date === currentDate);
         const completed = log?.completed || false;
         const streak = perfCache.getStreak(habit.id, appState.habitLogs);
-        const scheduleLabel = [habit.scheduledTime, habit.timeWindow].filter(Boolean).join(' � ');
+        const scheduleLabel = [habit.scheduledTime, habit.timeWindow].filter(Boolean).join(' ï¿½ ');
 
         return `
           <div class="card ${completed ? 'glow-green' : ''}">
@@ -1287,19 +1413,19 @@
       container.innerHTML = `
         <div class="grid grid-3">
           <div>
-            <h3 style="margin-bottom: 16px;">📋 A Fazer (${todoTasks.length})</h3>
+            <h3 style="margin-bottom: 16px;">ðŸ“‹ A Fazer (${todoTasks.length})</h3>
             <div class="grid gap-sm">
               ${todoTasks.map(t => this.renderTaskCard(t)).join('')}
             </div>
           </div>
           <div>
-            <h3 style="margin-bottom: 16px;">⚡ Em Andamento (${doingTasks.length})</h3>
+            <h3 style="margin-bottom: 16px;">âš¡ Em Andamento (${doingTasks.length})</h3>
             <div class="grid gap-sm">
               ${doingTasks.map(t => this.renderTaskCard(t)).join('')}
             </div>
           </div>
           <div>
-            <h3 style="margin-bottom: 16px;">✅ Concluído (${doneTasks.length})</h3>
+            <h3 style="margin-bottom: 16px;">âœ… ConcluÃ­do (${doneTasks.length})</h3>
             <div class="grid gap-sm">
               ${doneTasks.map(t => this.renderTaskCard(t)).join('')}
             </div>
@@ -1370,9 +1496,9 @@
       const tasks = appState.tasks;
 
       const columns = [
-        { id: 'todo', title: '📋 A Fazer', color: 'var(--accent-blue)', tasks: tasks.filter(t => t.status === 'todo') },
-        { id: 'doing', title: '⚡ Em Andamento', color: 'var(--accent-orange)', tasks: tasks.filter(t => t.status === 'doing') },
-        { id: 'done', title: '✅ Concluído', color: 'var(--accent-green)', tasks: tasks.filter(t => t.status === 'done') }
+        { id: 'todo', title: 'ðŸ“‹ A Fazer', color: 'var(--accent-blue)', tasks: tasks.filter(t => t.status === 'todo') },
+        { id: 'doing', title: 'âš¡ Em Andamento', color: 'var(--accent-orange)', tasks: tasks.filter(t => t.status === 'doing') },
+        { id: 'done', title: 'âœ… ConcluÃ­do', color: 'var(--accent-green)', tasks: tasks.filter(t => t.status === 'done') }
       ];
 
       container.innerHTML = `
@@ -1477,6 +1603,7 @@
 
           if (result.ok) {
             applyFullState(result.data);
+          notifications.refreshBadge();
             toast.success('Tarefa movida!');
 
             // Re-renderizar para atualizar contadores
@@ -1491,7 +1618,7 @@
     },
 
     renderCalendar: function(container) {
-      // Estado do calendário
+      // Estado do calendÃ¡rio
       if (!this.calendarState) {
         const today = new Date();
         this.calendarState = {
@@ -1504,7 +1631,7 @@
         <div>
           <div class="page-header">
             <div class="page-title">
-              <h1>Calendário</h1>
+              <h1>CalendÃ¡rio</h1>
               <span>Visualize suas rotinas e tarefas</span>
             </div>
             <div class="flex gap-sm">
@@ -1557,9 +1684,9 @@
       if (!container) return;
 
       const { year, month } = this.calendarState;
-      const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+      const monthNames = ['Janeiro', 'Fevereiro', 'MarÃ§o', 'Abril', 'Maio', 'Junho',
                           'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
-      const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+      const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'SÃ¡b'];
 
       const firstDay = new Date(year, month, 1);
       const lastDay = new Date(year, month + 1, 0);
@@ -1582,12 +1709,12 @@
           `).join('')}
       `;
 
-      // Células vazias antes do primeiro dia
+      // CÃ©lulas vazias antes do primeiro dia
       for (let i = 0; i < startingDayOfWeek; i++) {
         calendarHTML += '<div class="calendar-day empty"></div>';
       }
 
-      // Dias do mês
+      // Dias do mÃªs
       for (let day = 1; day <= daysInMonth; day++) {
         const date = new Date(year, month, day);
         const dateStr = date.toISOString().split('T')[0];
@@ -1662,7 +1789,7 @@
             <div class="flex-between mb-md">
               <h3>${utils.sanitize(goal.name)}</h3>
               <div class="flex gap-sm" style="align-items: center;">
-                ${isComplete ? '<span class="badge badge-low">✅ Concluída</span>' : ''}
+                ${isComplete ? '<span class="badge badge-low">âœ… ConcluÃ­da</span>' : ''}
                 <button class="btn btn-sm btn-secondary" onclick="goalHandlers.openEditModal('${goal.id}')" title="Editar">
                   <span class="material-icons">edit</span>
                 </button>
@@ -1681,7 +1808,7 @@
 
             ${goal.deadline ? `
               <p style="font-size: 13px; color: var(--text-tertiary); margin-top: 12px;">
-                📅 Prazo: ${utils.formatDate(goal.deadline)}
+                ðŸ“… Prazo: ${utils.formatDate(goal.deadline)}
               </p>
             ` : ''}
           </div>
@@ -1689,6 +1816,202 @@
       }).join('')}</div>`;
     },
 
+    renderReports: function(container) {
+      const today = utils.getTodayISO();
+      const tasks = appState.tasks;
+      const habits = appState.habits.filter(h => h.active !== false);
+      const goals = appState.goals;
+      const focusLogs = Array.isArray(appState.focusLogs) ? appState.focusLogs : [];
+
+      const statusBuckets = { todo: 0, doing: 0, done: 0, other: 0 };
+      tasks.forEach(task => {
+        if (task.status === 'done') statusBuckets.done++;
+        else if (task.status === 'doing') statusBuckets.doing++;
+        else if (task.status === 'todo' || task.status === 'open') statusBuckets.todo++;
+        else statusBuckets.other++;
+      });
+
+      const activeTasks = tasks.filter(t => t.status !== 'done');
+      const overdueTasks = activeTasks.filter(t => t.dueDate && t.dueDate < today);
+
+      const totalHabits = habits.length;
+      const last7Days = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        last7Days.push(d.toISOString().split('T')[0]);
+      }
+
+      const habitSeries = last7Days.map(dateStr => {
+        const completed = appState.habitLogs.filter(l => l.date === dateStr && l.completed).length;
+        const rate = totalHabits ? Math.round((completed / totalHabits) * 100) : 0;
+        return { date: dateStr, completed: completed, rate: rate };
+      });
+
+      const averageHabitRate = habitSeries.length
+        ? Math.round(habitSeries.reduce((sum, d) => sum + d.rate, 0) / habitSeries.length)
+        : 0;
+
+      const goalsCompleted = goals.filter(g => g.status === 'completed').length;
+      const goalsTotal = goals.length;
+      const goalProgress = goalsTotal
+        ? Math.round(goals.reduce((sum, g) => sum + ((g.currentValue || 0) / Math.max(1, g.targetValue || 1)) * 100, 0) / goalsTotal)
+        : 0;
+
+      const focusCutoff = new Date(today);
+      focusCutoff.setDate(focusCutoff.getDate() - 6);
+      const recentFocus = focusLogs.filter(l => new Date(l.startedAt || l.createdAt || today) >= focusCutoff);
+      const focusMinutes = recentFocus.reduce((sum, l) => sum + (parseInt(l.durationMinutes, 10) || 0), 0);
+
+      const totalTasks = tasks.length;
+      const taskDoneRate = totalTasks ? Math.round((statusBuckets.done / totalTasks) * 100) : 0;
+
+      container.innerHTML = `
+        <div>
+          <div class="page-header">
+            <div class="page-title">
+              <h1>Relatorios</h1>
+              <span>Visao geral de desempenho e produtividade.</span>
+            </div>
+          </div>
+
+          <div class="report-grid">
+            <div class="report-card">
+              <div class="report-label">Tarefas ativas</div>
+              <div class="report-value">${activeTasks.length}</div>
+              <div class="report-sub">${overdueTasks.length} atrasadas</div>
+            </div>
+            <div class="report-card">
+              <div class="report-label">Conclusao semanal</div>
+              <div class="report-value">${averageHabitRate}%</div>
+              <div class="report-sub">${totalHabits} rotinas ativas</div>
+            </div>
+            <div class="report-card">
+              <div class="report-label">Progresso de metas</div>
+              <div class="report-value">${goalProgress}%</div>
+              <div class="report-sub">${goalsCompleted}/${goalsTotal} concluidas</div>
+            </div>
+            <div class="report-card">
+              <div class="report-label">Foco (7 dias)</div>
+              <div class="report-value">${focusMinutes} min</div>
+              <div class="report-sub">${recentFocus.length} sessoes</div>
+            </div>
+          </div>
+
+          <div class="card mt-lg">
+            <div class="card-header">
+              <h2 class="card-title">Distribuicao de tarefas</h2>
+              <span class="chip">${taskDoneRate}% concluidas</span>
+            </div>
+            <div class="report-bars">
+              <div class="report-bar">
+                <div class="report-bar-label">A fazer</div>
+                <div class="report-bar-track">
+                  <div class="report-bar-fill" style="width: ${totalTasks ? Math.round((statusBuckets.todo / totalTasks) * 100) : 0}%"></div>
+                </div>
+                <div class="report-bar-value">${statusBuckets.todo}</div>
+              </div>
+              <div class="report-bar">
+                <div class="report-bar-label">Em andamento</div>
+                <div class="report-bar-track">
+                  <div class="report-bar-fill report-bar-warn" style="width: ${totalTasks ? Math.round((statusBuckets.doing / totalTasks) * 100) : 0}%"></div>
+                </div>
+                <div class="report-bar-value">${statusBuckets.doing}</div>
+              </div>
+              <div class="report-bar">
+                <div class="report-bar-label">Concluidas</div>
+                <div class="report-bar-track">
+                  <div class="report-bar-fill report-bar-success" style="width: ${totalTasks ? Math.round((statusBuckets.done / totalTasks) * 100) : 0}%"></div>
+                </div>
+                <div class="report-bar-value">${statusBuckets.done}</div>
+              </div>
+              ${statusBuckets.other ? `
+                <div class="report-bar">
+                  <div class="report-bar-label">Outras</div>
+                  <div class="report-bar-track">
+                    <div class="report-bar-fill report-bar-muted" style="width: ${totalTasks ? Math.round((statusBuckets.other / totalTasks) * 100) : 0}%"></div>
+                  </div>
+                  <div class="report-bar-value">${statusBuckets.other}</div>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+
+          <div class="card mt-md">
+            <div class="card-header">
+              <h2 class="card-title">Conclusao de rotinas (7 dias)</h2>
+              <span class="chip">${averageHabitRate}% media</span>
+            </div>
+            <div class="report-sparkline">
+              ${habitSeries.map(day => `
+                <div class="spark-column">
+                  <div class="spark-bar" style="height: ${Math.max(6, day.rate)}%"></div>
+                  <div class="spark-label">${day.rate}%</div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
+          <div class="card mt-md">
+            <div class="card-header">
+              <h2 class="card-title">Metas em andamento</h2>
+              <a href="#goals" class="btn btn-sm btn-secondary">Ver metas</a>
+            </div>
+            ${goals.length === 0 ? `
+              <div class="empty-state">
+                <span class="material-icons empty-state-icon">flag</span>
+                <h3 class="empty-state-title">Nenhuma meta cadastrada</h3>
+                <p class="empty-state-description">Defina suas metas para acompanhar progresso.</p>
+              </div>
+            ` : `
+              <div class="report-goals">
+                ${goals.slice(0, 5).map(goal => {
+                  const progress = goal.targetValue ? Math.min(100, Math.round((goal.currentValue / goal.targetValue) * 100)) : 0;
+                  return `
+                    <div class="report-goal">
+                      <div>
+                        <strong>${utils.sanitize(goal.title || goal.name || '')}</strong>
+                        <div class="report-goal-meta">${goal.currentValue || 0}/${goal.targetValue || 0} ${utils.sanitize(goal.unit || '')}</div>
+                      </div>
+                      <div class="report-goal-progress">
+                        <div class="report-goal-track">
+                          <div class="report-goal-fill" style="width: ${progress}%"></div>
+                        </div>
+                        <span>${progress}%</span>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+    },
+
+    renderNotifications: function(container) {
+      container.innerHTML = `
+        <div>
+          <div class="page-header">
+            <div class="page-title">
+              <h1>Notificacoes</h1>
+              <span>Acompanhe alertas e pendencias importantes.</span>
+            </div>
+            <div class="flex gap-sm">
+              <button class="btn btn-secondary" onclick="notificationHandlers.markAllRead()">
+                <span class="material-icons">done_all</span>
+                Marcar tudo como lido
+              </button>
+            </div>
+          </div>
+
+          <div id="notifications-summary" class="mb-md" style="color: var(--text-secondary); font-size: 14px;"></div>
+          <div id="notifications-list"></div>
+        </div>
+      `;
+
+      notificationHandlers.load();
+    },
     renderClickUp: function(container) {
       container.innerHTML = `
         <div>
@@ -1715,16 +2038,69 @@
           </div>
 
           <div class="card">
-            <div class="flex-between mb-md" style="gap: 12px; flex-wrap: wrap;">
-              <div style="min-width: 240px; flex: 1;">
+            <div class="filter-grid mb-md">
+              <div>
+                <label class="form-label">Busca</label>
                 <input type="text" class="form-input" id="clickup-search" placeholder="Buscar por titulo, responsavel, status, prioridade">
               </div>
+              <div>
+                <label class="form-label">Responsavel</label>
+                <input type="text" class="form-input" id="clickup-filter-assignee" placeholder="Nome ou email">
+              </div>
+              <div>
+                <label class="form-label">Prioridade</label>
+                <select class="form-select" id="clickup-filter-priority">
+                  <option value="all">Todas</option>
+                  <option value="urgent">Urgente</option>
+                  <option value="high">Alta</option>
+                  <option value="normal">Normal</option>
+                  <option value="low">Baixa</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label">Ordenar</label>
+                <select class="form-select" id="clickup-sort">
+                  <option value="updated:desc">Atualizado (desc)</option>
+                  <option value="updated:asc">Atualizado (asc)</option>
+                  <option value="due:asc">Due date (asc)</option>
+                  <option value="due:desc">Due date (desc)</option>
+                  <option value="priority:desc">Prioridade (alta)</option>
+                  <option value="priority:asc">Prioridade (baixa)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="filter-row mb-sm">
               <div class="flex gap-sm flex-wrap">
                 <button class="btn btn-sm btn-secondary clickup-filter" data-status="all">Todos</button>
                 <button class="btn btn-sm btn-secondary clickup-filter" data-status="open">Open</button>
                 <button class="btn btn-sm btn-secondary clickup-filter" data-status="doing">Doing</button>
                 <button class="btn btn-sm btn-secondary clickup-filter" data-status="done">Done</button>
+              </div>
+              <div class="flex gap-sm flex-wrap">
+                <button class="btn btn-sm btn-secondary" id="clickup-toggle-only-mine" data-active="true">Minhas</button>
+                <button class="btn btn-sm btn-secondary" id="clickup-toggle-unassigned" data-active="false">Sem responsavel</button>
                 <button class="btn btn-sm btn-secondary" id="clickup-toggle-out-of-view" data-active="false">Fora da view</button>
+                <button class="btn btn-sm btn-secondary" id="clickup-clear-filters">Limpar filtros</button>
+              </div>
+            </div>
+
+            <div class="filter-row mb-md">
+              <div class="filter-date">
+                <label class="form-label">Due date</label>
+                <div class="filter-date-range">
+                  <input type="date" class="form-input" id="clickup-filter-due-start">
+                  <span>ate</span>
+                  <input type="date" class="form-input" id="clickup-filter-due-end">
+                </div>
+              </div>
+              <div class="filter-date">
+                <label class="form-label">Atualizado</label>
+                <div class="filter-date-range">
+                  <input type="date" class="form-input" id="clickup-filter-updated-start">
+                  <span>ate</span>
+                  <input type="date" class="form-input" id="clickup-filter-updated-end">
+                </div>
               </div>
             </div>
 
@@ -1750,10 +2126,10 @@
     renderSettings: function(container) {
       container.innerHTML = `
         <div>
-          <h1>Configurações</h1>
+          <h1>ConfiguraÃ§Ãµes</h1>
 
           <div class="card">
-            <h3 class="mb-md">Aparência</h3>
+            <h3 class="mb-md">AparÃªncia</h3>
             <div class="form-group">
               <label class="form-label">Tema</label>
               <select class="form-select" id="theme-select">
@@ -1767,7 +2143,7 @@
             <h3 class="mb-md">Conta</h3>
             <div class="flex-between">
               <div>
-                <p style="color: var(--text-secondary); margin-bottom: 4px;">Usuário conectado</p>
+                <p style="color: var(--text-secondary); margin-bottom: 4px;">UsuÃ¡rio conectado</p>
                 <strong id="settings-user-email">${appState.userKey || 'Carregando...'}</strong>
               </div>
               <button class="btn btn-danger" onclick="authHandlers.logout()">Sair</button>
@@ -1783,7 +2159,7 @@
           </div>
 
           <div class="card mt-md">
-            <h3 class="mb-md">Integração ClickUp</h3>
+            <h3 class="mb-md">IntegraÃ§Ã£o ClickUp</h3>
             <p style="color: var(--text-secondary); margin-bottom: 16px; font-size: 14px;">
               Sincronize automaticamente tarefas da sua VIEW do ClickUp
             </p>
@@ -1866,31 +2242,31 @@
         <form id="create-habit-form">
           <div class="form-group">
             <label class="form-label">Nome da Rotina *</label>
-            <input type="text" class="form-input" id="habit-name" placeholder="Ex: Exercício matinal" required>
+            <input type="text" class="form-input" id="habit-name" placeholder="Ex: ExercÃ­cio matinal" required>
           </div>
 
           <div class="form-group">
-            <label class="form-label">Descrição</label>
+            <label class="form-label">DescriÃ§Ã£o</label>
             <textarea class="form-textarea" id="habit-description" placeholder="Descreva sua rotina..."></textarea>
           </div>
 
           <div class="form-group">
             <label class="form-label">Categoria</label>
             <select class="form-select" id="habit-category">
-              <option value="health">🏃 Saúde</option>
-              <option value="productivity">💼 Produtividade</option>
-              <option value="learning">📚 Aprendizado</option>
-              <option value="mindfulness">🧘 Mindfulness</option>
-              <option value="social">👥 Social</option>
-              <option value="finance">💰 Finanças</option>
-              <option value="other">📌 Outro</option>
+              <option value="health">ðŸƒ SaÃºde</option>
+              <option value="productivity">ðŸ’¼ Produtividade</option>
+              <option value="learning">ðŸ“š Aprendizado</option>
+              <option value="mindfulness">ðŸ§˜ Mindfulness</option>
+              <option value="social">ðŸ‘¥ Social</option>
+              <option value="finance">ðŸ’° FinanÃ§as</option>
+              <option value="other">ðŸ“Œ Outro</option>
             </select>
           </div>
 
           <div class="form-group">
-            <label class="form-label">Frequência</label>
+            <label class="form-label">FrequÃªncia</label>
             <select class="form-select" id="habit-frequency">
-              <option value="daily">Diária</option>
+              <option value="daily">DiÃ¡ria</option>
               <option value="weekly">Semanal</option>
               <option value="custom">Personalizada</option>
             </select>
@@ -1999,7 +2375,7 @@
     openEditModal: function(habitId) {
       const habit = appState.habits.find(h => h.id === habitId);
       if (!habit) {
-        toast.error('Rotina não encontrada');
+        toast.error('Rotina nÃ£o encontrada');
         return;
       }
 
@@ -2011,20 +2387,20 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label">Descrição</label>
+            <label class="form-label">DescriÃ§Ã£o</label>
             <textarea class="form-textarea" id="edit-habit-description">${utils.sanitize(habit.description || '')}</textarea>
           </div>
 
           <div class="form-group">
             <label class="form-label">Categoria</label>
             <select class="form-select" id="edit-habit-category">
-              <option value="health" ${habit.category === 'health' ? 'selected' : ''}>🏃 Saúde</option>
-              <option value="productivity" ${habit.category === 'productivity' ? 'selected' : ''}>💼 Produtividade</option>
-              <option value="learning" ${habit.category === 'learning' ? 'selected' : ''}>📚 Aprendizado</option>
-              <option value="mindfulness" ${habit.category === 'mindfulness' ? 'selected' : ''}>🧘 Mindfulness</option>
-              <option value="social" ${habit.category === 'social' ? 'selected' : ''}>👥 Social</option>
-              <option value="finance" ${habit.category === 'finance' ? 'selected' : ''}>💰 Finanças</option>
-              <option value="other" ${habit.category === 'other' ? 'selected' : ''}>📌 Outro</option>
+              <option value="health" ${habit.category === 'health' ? 'selected' : ''}>ðŸƒ SaÃºde</option>
+              <option value="productivity" ${habit.category === 'productivity' ? 'selected' : ''}>ðŸ’¼ Produtividade</option>
+              <option value="learning" ${habit.category === 'learning' ? 'selected' : ''}>ðŸ“š Aprendizado</option>
+              <option value="mindfulness" ${habit.category === 'mindfulness' ? 'selected' : ''}>ðŸ§˜ Mindfulness</option>
+              <option value="social" ${habit.category === 'social' ? 'selected' : ''}>ðŸ‘¥ Social</option>
+              <option value="finance" ${habit.category === 'finance' ? 'selected' : ''}>ðŸ’° FinanÃ§as</option>
+              <option value="other" ${habit.category === 'other' ? 'selected' : ''}>ðŸ“Œ Outro</option>
             </select>
           </div>
 
@@ -2114,7 +2490,7 @@
     },
 
     deleteHabit: async function(habitId) {
-      if (!confirm('Tem certeza que deseja excluir esta rotina? Esta a��o n�o pode ser desfeita.')) {
+      if (!confirm('Tem certeza que deseja excluir esta rotina? Esta aï¿½ï¿½o nï¿½o pode ser desfeita.')) {
         return;
       }
 
@@ -2129,7 +2505,7 @@
         applyFullState(result.data);
         modal.close();
         refreshUI();
-        toast.success('Rotina exclu�da!');
+        toast.success('Rotina excluï¿½da!');
       } else {
         toast.error('Erro ao excluir rotina: ' + result.error);
       }
@@ -2153,31 +2529,31 @@
       const content = `
         <form id="create-task-form">
           <div class="form-group">
-            <label class="form-label">Título da Tarefa *</label>
-            <input type="text" class="form-input" id="task-title" placeholder="Ex: Finalizar relatório" required>
+            <label class="form-label">TÃ­tulo da Tarefa *</label>
+            <input type="text" class="form-input" id="task-title" placeholder="Ex: Finalizar relatÃ³rio" required>
           </div>
 
           <div class="form-group">
-            <label class="form-label">Descrição</label>
+            <label class="form-label">DescriÃ§Ã£o</label>
             <textarea class="form-textarea" id="task-description" placeholder="Descreva os detalhes da tarefa..."></textarea>
           </div>
 
           <div class="form-group">
             <label class="form-label">Prioridade</label>
             <select class="form-select" id="task-priority">
-              <option value="low">🟢 Baixa</option>
-              <option value="normal" selected>🔵 Normal</option>
-              <option value="high">🟡 Alta</option>
-              <option value="urgent">🔴 Urgente</option>
+              <option value="low">ðŸŸ¢ Baixa</option>
+              <option value="normal" selected>ðŸ”µ Normal</option>
+              <option value="high">ðŸŸ¡ Alta</option>
+              <option value="urgent">ðŸ”´ Urgente</option>
             </select>
           </div>
 
           <div class="form-group">
             <label class="form-label">Status</label>
             <select class="form-select" id="task-status">
-              <option value="todo" selected>📋 A Fazer</option>
-              <option value="doing">⚡ Em Andamento</option>
-              <option value="done">✅ Concluído</option>
+              <option value="todo" selected>ðŸ“‹ A Fazer</option>
+              <option value="doing">âš¡ Em Andamento</option>
+              <option value="done">âœ… ConcluÃ­do</option>
             </select>
           </div>
 
@@ -2242,11 +2618,11 @@
       const repeatInterval = parseInt(document.getElementById('task-repeat-interval').value, 10) || 1;
       const category = document.getElementById('task-category').value.trim();
 
-      // Validações robustas
-      if (!utils.validateRequired(title, 'Título da tarefa')) return;
+      // ValidaÃ§Ãµes robustas
+      if (!utils.validateRequired(title, 'TÃ­tulo da tarefa')) return;
       if (dueDate && !utils.validateDate(dueDate, 'Data de vencimento', false)) return;
       if (dueTime && !utils.validateTime(dueTime, 'Hora de vencimento')) return;
-      if (repeatType && !utils.validateNumber(repeatInterval, 'Intervalo de repetição', 1, 365)) return;
+      if (repeatType && !utils.validateNumber(repeatInterval, 'Intervalo de repetiÃ§Ã£o', 1, 365)) return;
 
       const modalActions = document.querySelectorAll('.modal-footer button');
       modalActions.forEach(btn => btn.disabled = true);
@@ -2430,7 +2806,7 @@
     },
 
     deleteTask: async function(taskId) {
-      if (!confirm('Tem certeza que deseja excluir esta tarefa? Esta a��o n�o pode ser desfeita.')) {
+      if (!confirm('Tem certeza que deseja excluir esta tarefa? Esta aï¿½ï¿½o nï¿½o pode ser desfeita.')) {
         return;
       }
 
@@ -2445,7 +2821,7 @@
         applyFullState(result.data);
         modal.close();
         refreshUI();
-        toast.success('Tarefa exclu�da!');
+        toast.success('Tarefa excluï¿½da!');
       } else {
         toast.error('Erro ao excluir tarefa: ' + result.error);
       }
@@ -2462,7 +2838,7 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label">Descrição</label>
+            <label class="form-label">DescriÃ§Ã£o</label>
             <textarea class="form-textarea" id="goal-description" placeholder="Descreva sua meta..."></textarea>
           </div>
 
@@ -2505,12 +2881,12 @@
           <div class="form-group">
             <label class="form-label">Categoria</label>
             <select class="form-select" id="goal-category">
-              <option value="health">🏃 Saúde</option>
-              <option value="career">💼 Carreira</option>
-              <option value="learning">📚 Aprendizado</option>
-              <option value="finance">💰 Finanças</option>
-              <option value="personal">🎯 Pessoal</option>
-              <option value="other">📌 Outro</option>
+              <option value="health">ðŸƒ SaÃºde</option>
+              <option value="career">ðŸ’¼ Carreira</option>
+              <option value="learning">ðŸ“š Aprendizado</option>
+              <option value="finance">ðŸ’° FinanÃ§as</option>
+              <option value="personal">ðŸŽ¯ Pessoal</option>
+              <option value="other">ðŸ“Œ Outro</option>
             </select>
           </div>
         </form>
@@ -2533,7 +2909,7 @@
       const timezone = document.getElementById('goal-timezone').value;
       const category = document.getElementById('goal-category').value;
 
-      // Validações robustas
+      // ValidaÃ§Ãµes robustas
       if (!utils.validateRequired(title, 'Nome da meta')) return;
       if (!utils.validateNumber(targetValue, 'Valor alvo', 1, 1000000000)) return;
       if (!utils.validateNumber(currentValue, 'Valor atual', 0, 1000000000)) return;
@@ -2541,7 +2917,7 @@
       if (deadlineTime && !utils.validateTime(deadlineTime, 'Hora limite')) return;
 
       if (currentValue > targetValue) {
-        toast.error('O valor atual não pode ser maior que o valor alvo');
+        toast.error('O valor atual nÃ£o pode ser maior que o valor alvo');
         return;
       }
 
@@ -2718,7 +3094,7 @@
       const delta = parseInt(deltaInput.value);
 
       if (!delta || delta === 0) {
-        toast.error('Por favor, insira um valor válido');
+        toast.error('Por favor, insira um valor vÃ¡lido');
         return;
       }
 
@@ -2741,7 +3117,7 @@
     },
 
     deleteGoal: async function(goalId) {
-      if (!confirm('Tem certeza que deseja excluir esta meta? Esta a��o n�o pode ser desfeita.')) {
+      if (!confirm('Tem certeza que deseja excluir esta meta? Esta aï¿½ï¿½o nï¿½o pode ser desfeita.')) {
         return;
       }
 
@@ -2756,7 +3132,7 @@
         applyFullState(result.data);
         modal.close();
         refreshUI();
-        toast.success('Meta exclu�da!');
+        toast.success('Meta excluï¿½da!');
       } else {
         toast.error('Erro ao excluir meta: ' + result.error);
       }
@@ -2853,7 +3229,7 @@
               <div style="display: flex; flex-direction: column; gap: 8px;">
                 ${dayTasks.map(task => {
                   const priorityColors = { high: 'var(--accent-red)', medium: 'var(--accent-orange)', low: 'var(--accent-blue)' };
-                  const statusLabels = { todo: 'A fazer', doing: 'Em andamento', done: 'Concluído' };
+                  const statusLabels = { todo: 'A fazer', doing: 'Em andamento', done: 'ConcluÃ­do' };
                   return `
                     <div style="padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius-md);">
                       <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
@@ -2864,7 +3240,7 @@
                       </div>
                       <div style="font-size: 12px; color: var(--text-secondary);">
                         ${statusLabels[task.status] || task.status}
-                        ${task.dueTime ? ` • ${utils.formatTime(task.dueTime)}` : ''}
+                        ${task.dueTime ? ` â€¢ ${utils.formatTime(task.dueTime)}` : ''}
                       </div>
                     </div>
                   `;
@@ -2972,7 +3348,7 @@
         btn.innerHTML = '<span class="material-icons">hourglass_empty</span> Sincronizando...';
       }
 
-      toast.info('Iniciando sincronização com ClickUp...');
+      toast.info('Iniciando sincronizaÃ§Ã£o com ClickUp...');
 
       try {
         const result = await api.call('syncClickUpNow');
@@ -2982,11 +3358,11 @@
           const routine = result.routine || {};
 
           const summary = `
-            ✅ Sincronização concluída!<br>
-            📥 ${sheet.fetched || 0} tarefas obtidas do ClickUp<br>
-            💾 ${sheet.upserted || 0} salvas no banco (${sheet.inserted || 0} novas, ${sheet.updated || 0} atualizadas)<br>
-            🔗 ${routine.synced || 0} sincronizadas com rotinas internas<br>
-            ⏱️ Tempo: ${Math.round((result.totalDurationMs || 0) / 1000)}s
+            ƒo. SincronizaÇõÇœo concluÇðda!<br>
+            ÐY"¾ ${sheet.fetched || 0} tarefas obtidas do ClickUp<br>
+            ÐY'ó ${sheet.upserted || 0} salvas no banco (${sheet.inserted || 0} novas, ${sheet.updated || 0} atualizadas)<br>
+            ÐY"- ${routine.synced || 0} sincronizadas | ${routine.skipped || 0} fora da view | ${routine.errors || 0} erro(s)<br>
+            ƒ?ñ‹÷? Tempo: ${Math.round((result.totalDurationMs || 0) / 1000)}s
           `;
 
           if (statusDiv) {
@@ -2994,21 +3370,21 @@
               <div style="padding: 12px; background: rgba(52, 168, 83, 0.1); border-left: 3px solid #34a853; border-radius: 4px;">
                 <div style="font-size: 13px; line-height: 1.6;">${summary}</div>
                 <small style="color: var(--text-tertiary); margin-top: 8px; display: block;">
-                  Última sincronização: ${new Date().toLocaleString('pt-BR')}
+                  Ãšltima sincronizaÃ§Ã£o: ${new Date().toLocaleString('pt-BR')}
                 </small>
               </div>
             `;
           }
 
-          toast.success('Sincronização concluída!');
+          toast.success('SincronizaÃ§Ã£o concluÃ­da!');
         } else {
-          toast.error('Erro na sincronização: ' + (result.error || 'Erro desconhecido'));
+          toast.error('Erro na sincronizaÃ§Ã£o: ' + (result.error || 'Erro desconhecido'));
 
           if (statusDiv) {
             statusDiv.innerHTML = `
               <div style="padding: 12px; background: rgba(234, 67, 53, 0.1); border-left: 3px solid #ea4335; border-radius: 4px;">
                 <div style="font-size: 13px; color: var(--error-color);">
-                  ❌ Erro: ${utils.sanitize(result.error || 'Erro desconhecido')}
+                  âŒ Erro: ${utils.sanitize(result.error || 'Erro desconhecido')}
                 </div>
               </div>
             `;
@@ -3041,8 +3417,8 @@
             statusDiv.innerHTML = `
               <div style="padding: 12px; background: rgba(52, 168, 83, 0.1); border-left: 3px solid #34a853; border-radius: 4px;">
                 <div style="font-size: 13px;">
-                  ✅ Última sincronização bem-sucedida<br>
-                  📊 ${summary.fetched || 0} tarefas | ${summary.synced || 0} sincronizadas | ${Math.round((summary.duration || 0) / 1000)}s
+                  âœ… Ãšltima sincronizaÃ§Ã£o bem-sucedida<br>
+                  ðŸ“Š ${summary.fetched || 0} tarefas | ${summary.synced || 0} sincronizadas | ${summary.skipped || 0} fora da view | ${summary.errors || 0} erro(s) | ${Math.round((summary.duration || 0) / 1000)}s<br>Salvas: ${summary.upserted || 0} (${summary.inserted || 0} novas, ${summary.updated || 0} atualizadas) | Fora da view: ${summary.outOfView || 0}
                 </div>
                 <small style="color: var(--text-tertiary); margin-top: 8px; display: block;">
                   ${timestamp}
@@ -3053,7 +3429,8 @@
             statusDiv.innerHTML = `
               <div style="padding: 12px; background: rgba(234, 67, 53, 0.1); border-left: 3px solid #ea4335; border-radius: 4px;">
                 <div style="font-size: 13px; color: var(--error-color);">
-                  ❌ Última sincronização falhou<br>
+                  âŒ Ãšltima sincronizaÃ§Ã£o falhou<br>
+                  ${sync.stage ? `Etapa: ${utils.sanitize(sync.stage)}` : ''}<br>
                   ${utils.sanitize(sync.error || 'Erro desconhecido')}
                 </div>
                 <small style="color: var(--text-tertiary); margin-top: 8px; display: block;">
@@ -3066,7 +3443,7 @@
           statusDiv.innerHTML = `
             <div style="padding: 12px; background: rgba(251, 188, 5, 0.1); border-left: 3px solid #fbbc05; border-radius: 4px;">
               <div style="font-size: 13px;">
-                ℹ️ Nenhuma sincronização realizada ainda
+                â„¹ï¸ Nenhuma sincronizaÃ§Ã£o realizada ainda
               </div>
             </div>
           `;
@@ -3081,6 +3458,16 @@
     state: {
       query: '',
       status: 'all',
+      priority: 'all',
+      assignee: '',
+      dueStart: '',
+      dueEnd: '',
+      updatedStart: '',
+      updatedEnd: '',
+      onlyMine: true,
+      onlyUnassigned: false,
+      sortBy: 'updated',
+      sortDir: 'desc',
       includeForaDaView: false,
       page: 1,
       pageSize: 25,
@@ -3105,6 +3492,65 @@
         }, 400));
       }
 
+      const assigneeInput = document.getElementById('clickup-filter-assignee');
+      if (assigneeInput) {
+        assigneeInput.addEventListener('input', utils.debounce(() => {
+          this.state.assignee = assigneeInput.value.trim();
+          this.resetAndLoad();
+        }, 400));
+      }
+
+      const prioritySelect = document.getElementById('clickup-filter-priority');
+      if (prioritySelect) {
+        prioritySelect.addEventListener('change', () => {
+          this.state.priority = prioritySelect.value;
+          this.resetAndLoad();
+        });
+      }
+
+      const sortSelect = document.getElementById('clickup-sort');
+      if (sortSelect) {
+        sortSelect.addEventListener('change', () => {
+          const value = sortSelect.value || 'updated:desc';
+          const parts = value.split(':');
+          this.state.sortBy = parts[0] || 'updated';
+          this.state.sortDir = parts[1] || 'desc';
+          this.resetAndLoad();
+        });
+      }
+
+      const dueStartInput = document.getElementById('clickup-filter-due-start');
+      if (dueStartInput) {
+        dueStartInput.addEventListener('change', () => {
+          this.state.dueStart = dueStartInput.value;
+          this.resetAndLoad();
+        });
+      }
+
+      const dueEndInput = document.getElementById('clickup-filter-due-end');
+      if (dueEndInput) {
+        dueEndInput.addEventListener('change', () => {
+          this.state.dueEnd = dueEndInput.value;
+          this.resetAndLoad();
+        });
+      }
+
+      const updatedStartInput = document.getElementById('clickup-filter-updated-start');
+      if (updatedStartInput) {
+        updatedStartInput.addEventListener('change', () => {
+          this.state.updatedStart = updatedStartInput.value;
+          this.resetAndLoad();
+        });
+      }
+
+      const updatedEndInput = document.getElementById('clickup-filter-updated-end');
+      if (updatedEndInput) {
+        updatedEndInput.addEventListener('change', () => {
+          this.state.updatedEnd = updatedEndInput.value;
+          this.resetAndLoad();
+        });
+      }
+
       document.querySelectorAll('.clickup-filter').forEach(btn => {
         btn.addEventListener('click', () => {
           this.state.status = btn.getAttribute('data-status') || 'all';
@@ -3113,13 +3559,74 @@
         });
       });
 
+      const onlyMineBtn = document.getElementById('clickup-toggle-only-mine');
+      if (onlyMineBtn) {
+        onlyMineBtn.addEventListener('click', () => {
+          this.state.onlyMine = !this.state.onlyMine;
+          if (this.state.onlyMine) {
+            this.state.onlyUnassigned = false;
+          }
+          this.updateFilterButtons();
+          this.resetAndLoad();
+        });
+      }
+
+      const unassignedBtn = document.getElementById('clickup-toggle-unassigned');
+      if (unassignedBtn) {
+        unassignedBtn.addEventListener('click', () => {
+          this.state.onlyUnassigned = !this.state.onlyUnassigned;
+          if (this.state.onlyUnassigned) {
+            this.state.onlyMine = false;
+          }
+          this.updateFilterButtons();
+          this.resetAndLoad();
+        });
+      }
+
       const toggleBtn = document.getElementById('clickup-toggle-out-of-view');
       if (toggleBtn) {
         toggleBtn.addEventListener('click', () => {
           this.state.includeForaDaView = !this.state.includeForaDaView;
-          toggleBtn.setAttribute('data-active', this.state.includeForaDaView ? 'true' : 'false');
-          toggleBtn.classList.toggle('btn-primary', this.state.includeForaDaView);
-          toggleBtn.classList.toggle('btn-secondary', !this.state.includeForaDaView);
+          this.updateFilterButtons();
+          this.resetAndLoad();
+        });
+      }
+
+      const clearBtn = document.getElementById('clickup-clear-filters');
+      if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+          this.state.query = '';
+          this.state.status = 'all';
+          this.state.priority = 'all';
+          this.state.assignee = '';
+          this.state.dueStart = '';
+          this.state.dueEnd = '';
+          this.state.updatedStart = '';
+          this.state.updatedEnd = '';
+          this.state.onlyMine = true;
+          this.state.onlyUnassigned = false;
+          this.state.includeForaDaView = false;
+          this.state.sortBy = 'updated';
+          this.state.sortDir = 'desc';
+
+          const searchInput = document.getElementById('clickup-search');
+          if (searchInput) searchInput.value = '';
+          const assigneeInput = document.getElementById('clickup-filter-assignee');
+          if (assigneeInput) assigneeInput.value = '';
+          const prioritySelect = document.getElementById('clickup-filter-priority');
+          if (prioritySelect) prioritySelect.value = 'all';
+          const sortSelect = document.getElementById('clickup-sort');
+          if (sortSelect) sortSelect.value = 'updated:desc';
+          const dueStartInput = document.getElementById('clickup-filter-due-start');
+          if (dueStartInput) dueStartInput.value = '';
+          const dueEndInput = document.getElementById('clickup-filter-due-end');
+          if (dueEndInput) dueEndInput.value = '';
+          const updatedStartInput = document.getElementById('clickup-filter-updated-start');
+          if (updatedStartInput) updatedStartInput.value = '';
+          const updatedEndInput = document.getElementById('clickup-filter-updated-end');
+          if (updatedEndInput) updatedEndInput.value = '';
+
+          this.updateFilterButtons();
           this.resetAndLoad();
         });
       }
@@ -3132,6 +3639,27 @@
         btn.classList.toggle('btn-primary', isActive);
         btn.classList.toggle('btn-secondary', !isActive);
       });
+
+      const toggleBtn = document.getElementById('clickup-toggle-out-of-view');
+      if (toggleBtn) {
+        toggleBtn.setAttribute('data-active', this.state.includeForaDaView ? 'true' : 'false');
+        toggleBtn.classList.toggle('btn-primary', this.state.includeForaDaView);
+        toggleBtn.classList.toggle('btn-secondary', !this.state.includeForaDaView);
+      }
+
+      const onlyMineBtn = document.getElementById('clickup-toggle-only-mine');
+      if (onlyMineBtn) {
+        onlyMineBtn.setAttribute('data-active', this.state.onlyMine ? 'true' : 'false');
+        onlyMineBtn.classList.toggle('btn-primary', this.state.onlyMine);
+        onlyMineBtn.classList.toggle('btn-secondary', !this.state.onlyMine);
+      }
+
+      const unassignedBtn = document.getElementById('clickup-toggle-unassigned');
+      if (unassignedBtn) {
+        unassignedBtn.setAttribute('data-active', this.state.onlyUnassigned ? 'true' : 'false');
+        unassignedBtn.classList.toggle('btn-primary', this.state.onlyUnassigned);
+        unassignedBtn.classList.toggle('btn-secondary', !this.state.onlyUnassigned);
+      }
     },
 
     resetAndLoad: function() {
@@ -3157,6 +3685,16 @@
         userKey: appState.userKey,
         query: this.state.query,
         status: this.state.status,
+        priority: this.state.priority,
+        assignee: this.state.assignee,
+        dueStart: this.state.dueStart,
+        dueEnd: this.state.dueEnd,
+        updatedStart: this.state.updatedStart,
+        updatedEnd: this.state.updatedEnd,
+        onlyMine: this.state.onlyMine,
+        onlyUnassigned: this.state.onlyUnassigned,
+        sortBy: this.state.sortBy,
+        sortDir: this.state.sortDir,
         page: this.state.page,
         pageSize: this.state.pageSize,
         includeForaDaView: this.state.includeForaDaView
@@ -3276,12 +3814,15 @@
       const rows = items.map(task => `
         <div style="display: grid; grid-template-columns: 2.2fr 1fr 1fr 1.2fr 1fr 1.2fr 120px; gap: 12px; align-items: center; padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
           <div>
-            <div style="font-weight: 600;">${utils.sanitize(task.name || '')}</div>
+            <div style="font-weight: 600;">
+              ${utils.sanitize(task.name || '')}
+              ${task.fora_da_view ? '<span class="chip chip-warning" style="margin-left: 8px;">Fora da view</span>' : ''}
+            </div>
             <div style="font-size: 12px; color: var(--text-tertiary);">#${utils.sanitize(task.task_id || '')}</div>
           </div>
           <div>${this.renderStatusPill(task.status)}</div>
           <div>${this.renderPriorityBadge(task.priority)}</div>
-          <div style="color: var(--text-secondary); font-size: 14px;">${utils.sanitize(task.responsavel_principal || '') || '-'}</div>
+          <div style="color: var(--text-secondary); font-size: 14px;">${utils.sanitize(task.responsavel_principal || task.assignees || task.responsavel_email || '-')}</div>
           <div style="font-size: 14px;">${this.formatDate(task.due_date, false) || '-'}</div>
           <div style="font-size: 13px; color: var(--text-secondary);">${this.formatDate(task.date_updated, true) || '-'}</div>
           <div>
@@ -3322,7 +3863,7 @@
               <div style="padding: 12px; background: rgba(52, 168, 83, 0.1); border-left: 3px solid #34a853; border-radius: 4px;">
                 <div style="font-size: 13px;">
                   Sincronizacao concluida<br>
-                  ${summary.fetched || 0} tarefas | ${summary.synced || 0} sincronizadas | ${Math.round((summary.duration || 0) / 1000)}s
+                  ${summary.fetched || 0} tarefas | ${summary.synced || 0} sincronizadas | ${summary.skipped || 0} fora da view | ${summary.errors || 0} erro(s) | ${Math.round((summary.duration || 0) / 1000)}s<br>Salvas: ${summary.upserted || 0} (${summary.inserted || 0} novas, ${summary.updated || 0} atualizadas) | Fora da view: ${summary.outOfView || 0}
                 </div>
                 <small style="color: var(--text-tertiary); margin-top: 8px; display: block;">
                   ${timestamp}
@@ -3334,6 +3875,7 @@
               <div style="padding: 12px; background: rgba(234, 67, 53, 0.1); border-left: 3px solid #ea4335; border-radius: 4px;">
                 <div style="font-size: 13px; color: var(--error-color);">
                   Ultima sincronizacao falhou<br>
+                  ${sync.stage ? `Etapa: ${utils.sanitize(sync.stage)}` : ''}<br>
                   ${utils.sanitize(sync.error || 'Erro desconhecido')}
                 </div>
                 <small style="color: var(--text-tertiary); margin-top: 8px; display: block;">
@@ -3387,6 +3929,117 @@
     }
   };
 
+  const notificationHandlers = {
+    state: {
+      items: [],
+      isLoading: false
+    },
+
+    load: async function() {
+      this.state.isLoading = true;
+      const items = notifications.buildItems();
+
+      try {
+        const result = await api.call('getLastSyncStatus');
+        if (result.ok && result.lastSync && result.lastSync.success === false) {
+          const sync = result.lastSync;
+          items.unshift({
+            id: `clickup-sync-${sync.timestamp || 'unknown'}`,
+            type: 'clickup',
+            title: 'Sincronizacao ClickUp falhou',
+            message: sync.error || 'Erro desconhecido',
+            timestamp: sync.timestamp || utils.getTodayISO(),
+            action: { label: 'Ir para ClickUp', view: 'clickup' }
+          });
+        }
+      } catch (error) {
+        console.warn('Erro ao carregar status do ClickUp para notificacoes', error);
+      }
+
+      this.state.items = items;
+      this.state.isLoading = false;
+      this.render();
+    },
+
+    render: function() {
+      const container = document.getElementById('notifications-list');
+      const summary = document.getElementById('notifications-summary');
+      if (!container) return;
+
+      if (this.state.isLoading) {
+        container.innerHTML = `
+          <div class="skeleton skeleton-title"></div>
+          <div class="skeleton skeleton-text"></div>
+          <div class="skeleton skeleton-text"></div>
+        `;
+        if (summary) summary.textContent = 'Carregando...';
+        return;
+      }
+
+      const items = this.state.items || [];
+      const unreadCount = items.filter(item => !notifications.isRead(item.id)).length;
+      if (summary) {
+        summary.textContent = `${unreadCount} nao lidas de ${items.length} notificacoes`;
+      }
+
+      if (items.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons empty-state-icon">notifications</span>
+            <h3 class="empty-state-title">Nenhuma notificacao</h3>
+            <p class="empty-state-description">Tudo em dia por aqui.</p>
+          </div>
+        `;
+        notifications.refreshBadge(items);
+        return;
+      }
+
+      const iconMap = {
+        task: 'task_alt',
+        habit: 'check_circle',
+        goal: 'flag',
+        clickup: 'fact_check'
+      };
+
+      container.innerHTML = items.map(item => {
+        const isRead = notifications.isRead(item.id);
+        const icon = iconMap[item.type] || 'info';
+        const timeLabel = item.timestamp ? new Date(item.timestamp).toLocaleString('pt-BR') : '';
+        return `
+          <div class="notification-item ${isRead ? '' : 'unread'}">
+            <div class="notification-icon"><span class="material-icons">${icon}</span></div>
+            <div class="notification-body">
+              <div class="notification-title">${utils.sanitize(item.title || '')}</div>
+              <div class="notification-message">${utils.sanitize(item.message || '')}</div>
+              <div class="notification-meta">${utils.sanitize(timeLabel)}</div>
+            </div>
+            <div class="notification-actions">
+              ${item.action ? `<button class="btn btn-sm btn-secondary" onclick="notificationHandlers.openAction('${item.action.view}')">${utils.sanitize(item.action.label)}</button>` : ''}
+              ${isRead ? '' : `<button class="btn btn-sm btn-primary" onclick="notificationHandlers.markRead('${item.id}')">Marcar como lida</button>`}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      notifications.refreshBadge(items);
+    },
+
+    markRead: function(id) {
+      notifications.markRead(id);
+      this.render();
+    },
+
+    markAllRead: function() {
+      notifications.markAllRead(this.state.items);
+      this.render();
+    },
+
+    openAction: function(view) {
+      if (view) {
+        router.navigate(view);
+      }
+    }
+  };
   const authHandlers = {
     logout: function() {
       if (confirm('Tem certeza que deseja sair?')) {
@@ -3406,6 +4059,7 @@
   window.focusHandlers = focusHandlers;
   window.clickupHandlers = clickupHandlers;
   window.clickupPageHandlers = clickupPageHandlers;
+  window.notificationHandlers = notificationHandlers;
   window.authHandlers = authHandlers;
   window.router = router;
   window.utils = utils;
@@ -3415,35 +4069,35 @@
   // ============================================
   // INITIALIZATION
   // ============================================
-  // Verificação defensiva de autenticação
+  // VerificaÃ§Ã£o defensiva de autenticaÃ§Ã£o
   async function checkAuth() {
     try {
       const sessionInfo = await api.call('getSessionInfo');
 
       if (!sessionInfo.ok || !sessionInfo.loggedIn) {
-        console.warn('Usuário não autenticado, redirecionando para login do Google...');
+        console.warn('UsuÃ¡rio nÃ£o autenticado, redirecionando para login do Google...');
 
-        // Evitar loop se já estivermos no bootstrap
+        // Evitar loop se jÃ¡ estivermos no bootstrap
         if (window.location.pathname && window.location.pathname.includes('bootstrap')) {
-          console.log('Já estamos no bootstrap, não redirecionar novamente');
+          console.log('JÃ¡ estamos no bootstrap, nÃ£o redirecionar novamente');
           return false;
         }
 
-        // Redirecionar para forçar login padrão do Google
-        // O backend vai detectar que não está logado e retornar bootstrap.html
-        console.log('Recarregando para mostrar bootstrap e forçar login Google');
+        // Redirecionar para forÃ§ar login padrÃ£o do Google
+        // O backend vai detectar que nÃ£o estÃ¡ logado e retornar bootstrap.html
+        console.log('Recarregando para mostrar bootstrap e forÃ§ar login Google');
         window.location.reload();
 
         return false;
       }
 
-      console.log('✅ Autenticação verificada:', sessionInfo.email);
+      console.log('âœ… AutenticaÃ§Ã£o verificada:', sessionInfo.email);
       return true;
 
     } catch (error) {
-      console.error('❌ Erro ao verificar autenticação:', error);
+      console.error('âŒ Erro ao verificar autenticaÃ§Ã£o:', error);
 
-      // Em caso de erro, mostrar mensagem ao invés de tela branca
+      // Em caso de erro, mostrar mensagem ao invÃ©s de tela branca
       const appContainer = document.getElementById('app');
       const loadingScreen = document.getElementById('loading-screen');
 
@@ -3455,7 +4109,7 @@
             <span class="material-icons" style="font-size: 64px; color: var(--error-color); margin-bottom: 20px;">error_outline</span>
             <h2 style="color: var(--text-primary); margin-bottom: 12px;">Erro ao carregar aplicativo</h2>
             <p style="color: var(--text-secondary); margin-bottom: 24px;">
-              Não foi possível verificar sua autenticação. Tente recarregar a página.
+              NÃ£o foi possÃ­vel verificar sua autenticaÃ§Ã£o. Tente recarregar a pÃ¡gina.
             </p>
             <button class="btn btn-primary" onclick="location.reload()">
               <span class="material-icons">refresh</span>
@@ -3497,17 +4151,18 @@
         if (result.ok) {
           updateLoadingMessage('Carregando dados...');
           applyFullState(result.data);
+          notifications.refreshBadge();
           storage.save('appCache', appState);
 
           updateLoadingMessage('Preparando interface...');
 
-          // Atualizar email do usuário na sidebar
+          // Atualizar email do usuÃ¡rio na sidebar
           const userEmailElement = document.getElementById('user-email');
           if (userEmailElement) {
-            userEmailElement.textContent = result.data.userKey || 'Usuário';
+            userEmailElement.textContent = result.data.userKey || 'UsuÃ¡rio';
           }
 
-          // Usar requestAnimationFrame para suavizar a transição
+          // Usar requestAnimationFrame para suavizar a transiÃ§Ã£o
           requestAnimationFrame(() => {
             if (appContainer) {
               appContainer.style.display = '';
@@ -3524,17 +4179,17 @@
             toast.success('Bem-vindo ao THX Ops!');
           });
 
-          return; // Sucesso, sair da função
+          return; // Sucesso, sair da funÃ§Ã£o
         } else {
-          // Se houver erro e ainda há tentativas, esperar e tentar novamente
+          // Se houver erro e ainda hÃ¡ tentativas, esperar e tentar novamente
           if (attempt < maxRetries) {
             updateLoadingMessage(`Reconectando em 1 segundo...`);
             console.warn(`Falha na tentativa ${attempt}, tentando novamente em 1 segundo...`);
             await new Promise(resolve => setTimeout(resolve, 1000));
             continue;
           }
-          // Última tentativa falhou, mostrar tela de erro
-          showErrorScreen(result.error || 'Erro desconhecido ao carregar aplicação');
+          // Ãšltima tentativa falhou, mostrar tela de erro
+          showErrorScreen(result.error || 'Erro desconhecido ao carregar aplicaÃ§Ã£o');
         }
       } catch (error) {
         console.error(`Erro na tentativa ${attempt}:`, error);
@@ -3543,7 +4198,7 @@
           await new Promise(resolve => setTimeout(resolve, 1000));
           continue;
         }
-        showErrorScreen('Erro ao inicializar aplicação. Por favor, recarregue a página.');
+        showErrorScreen('Erro ao inicializar aplicaÃ§Ã£o. Por favor, recarregue a pÃ¡gina.');
       }
     }
   }
@@ -3568,18 +4223,19 @@
   document.addEventListener('DOMContentLoaded', async function() {
     theme.init();
 
-    // Verificação defensiva de autenticação antes de tudo
+    // VerificaÃ§Ã£o defensiva de autenticaÃ§Ã£o antes de tudo
     const isAuthenticated = await checkAuth();
     if (!isAuthenticated) {
-      console.log('Autenticação falhou, não inicializando app');
+      console.log('AutenticaÃ§Ã£o falhou, nÃ£o inicializando app');
       return;
     }
 
-    // Verificar se há dados em cache para carregar rapidamente
+    // Verificar se hÃ¡ dados em cache para carregar rapidamente
     const cachedData = storage.load('appCache');
     if (cachedData && cachedData.userKey) {
       console.log('Dados em cache encontrados, carregando...');
       applyFullState(cachedData);
+      notifications.refreshBadge();
     }
 
     // Inicializar app
@@ -3588,6 +4244,16 @@
 
 })();
 </script>
+
+
+
+
+
+
+
+
+
+
 
 
 
