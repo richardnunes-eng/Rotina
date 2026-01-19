@@ -133,6 +133,60 @@
       div.textContent = str;
       return div.innerHTML;
     },
+
+    // Validações
+    validateRequired: function(value, fieldName) {
+      if (!value || String(value).trim() === '') {
+        toast.error(`${fieldName} é obrigatório`);
+        return false;
+      }
+      return true;
+    },
+
+    validateNumber: function(value, fieldName, min = null, max = null) {
+      const num = parseFloat(value);
+      if (isNaN(num)) {
+        toast.error(`${fieldName} deve ser um número válido`);
+        return false;
+      }
+      if (min !== null && num < min) {
+        toast.error(`${fieldName} deve ser maior ou igual a ${min}`);
+        return false;
+      }
+      if (max !== null && num > max) {
+        toast.error(`${fieldName} deve ser menor ou igual a ${max}`);
+        return false;
+      }
+      return true;
+    },
+
+    validateDate: function(dateStr, fieldName, allowPast = true) {
+      if (!dateStr) return true; // Opcional
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) {
+        toast.error(`${fieldName} inválida`);
+        return false;
+      }
+      if (!allowPast) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (date < today) {
+          toast.error(`${fieldName} não pode ser no passado`);
+          return false;
+        }
+      }
+      return true;
+    },
+
+    validateTime: function(timeStr, fieldName) {
+      if (!timeStr) return true; // Opcional
+      const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+      if (!timeRegex.test(timeStr)) {
+        toast.error(`${fieldName} inválido. Use formato HH:MM`);
+        return false;
+      }
+      return true;
+    },
     
     formatDate: function(dateStr) {
       if (!dateStr) return '';
@@ -486,6 +540,10 @@
       return await this.call('updateGoalProgress', appState.userKey, goalId, newValue);
     },
 
+    addGoalProgress: async function(goalId, delta, note, date) {
+      return await this.call('addGoalProgress', appState.userKey, goalId, delta, note, date);
+    },
+
     // Habit Logs API
     logHabit: async function(habitId, date, completed) {
       return await this.call('logHabit', appState.userKey, habitId, date, completed);
@@ -493,6 +551,19 @@
 
     toggleHabitCompletion: async function(habitId, date) {
       return await this.call('toggleHabitCompletion', appState.userKey, habitId, date);
+    },
+
+    // ClickUp API
+    listClickUpTasks: async function(params) {
+      return await this.call('listClickUpTasks', params);
+    },
+
+    syncClickUp: async function() {
+      return await this.call('syncClickUp', appState.userKey);
+    },
+
+    getClickUpStatus: async function() {
+      return await this.call('getClickUpStatus', appState.userKey);
     }
   };
 
@@ -952,22 +1023,121 @@
       const minutes = Math.floor(appState.focus.remainingSeconds / 60).toString().padStart(2, '0');
       const seconds = (appState.focus.remainingSeconds % 60).toString().padStart(2, '0');
 
+      const totalSeconds = 1500;
+      const progress = ((totalSeconds - appState.focus.remainingSeconds) / totalSeconds) * 100;
+      const circumference = 2 * Math.PI * 120;
+      const offset = circumference - (progress / 100) * circumference;
+
       container.innerHTML = `
         <div>
           <div class="page-header">
             <div class="page-title">
               <h1>Modo Foco</h1>
-              <span>Sessoes rapidas para avancar tarefas criticas.</span>
+              <span>Técnica Pomodoro - 25 minutos de foco total</span>
             </div>
           </div>
 
-          <div class="focus-shell">
-            <span class="chip">${utils.sanitize(label)}</span>
-            <div class="focus-timer">${minutes}:${seconds}</div>
-            <div class="flex gap-sm" style="justify-content: center;">
-              <button class="btn btn-secondary" onclick="focusHandlers.pickTask()">Selecionar tarefa</button>
-              <button class="btn btn-primary" onclick="focusHandlers.toggle()">${appState.focus.isRunning ? 'Pausar' : 'Iniciar'}</button>
-              <button class="btn btn-secondary" onclick="focusHandlers.reset()">Resetar</button>
+          <div class="focus-container">
+            <div class="focus-card">
+              <div class="focus-task-info">
+                <span class="material-icons" style="font-size: 20px; color: var(--accent-blue);">
+                  ${activeTask ? 'task_alt' : 'radio_button_unchecked'}
+                </span>
+                <div style="flex: 1;">
+                  <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 4px;">Tarefa Atual</div>
+                  <div style="font-weight: 600; color: var(--text-primary);">${utils.sanitize(label)}</div>
+                </div>
+                <button class="btn btn-sm btn-secondary" onclick="focusHandlers.pickTask()">
+                  <span class="material-icons">edit</span>
+                </button>
+              </div>
+
+              <div class="focus-timer-container">
+                <svg class="focus-circle" viewBox="0 0 260 260">
+                  <circle class="focus-circle-bg" cx="130" cy="130" r="120"></circle>
+                  <circle
+                    class="focus-circle-progress ${appState.focus.isRunning ? 'running' : ''}"
+                    cx="130"
+                    cy="130"
+                    r="120"
+                    style="stroke-dasharray: ${circumference}; stroke-dashoffset: ${offset};"
+                  ></circle>
+                </svg>
+                <div class="focus-timer-content">
+                  <div class="focus-timer-display">${minutes}:${seconds}</div>
+                  <div class="focus-timer-label">${appState.focus.isRunning ? 'Em andamento' : 'Pausado'}</div>
+                </div>
+              </div>
+
+              <div class="focus-controls">
+                <button class="btn btn-secondary" onclick="focusHandlers.reset()">
+                  <span class="material-icons">refresh</span>
+                  Resetar
+                </button>
+                <button class="btn ${appState.focus.isRunning ? 'btn-danger' : 'btn-primary'} btn-lg" onclick="focusHandlers.toggle()" ${!activeTask ? 'disabled' : ''}>
+                  <span class="material-icons">${appState.focus.isRunning ? 'pause' : 'play_arrow'}</span>
+                  ${appState.focus.isRunning ? 'Pausar' : 'Iniciar'}
+                </button>
+                <button class="btn btn-secondary" onclick="focusHandlers.skip()">
+                  <span class="material-icons">skip_next</span>
+                  Pular
+                </button>
+              </div>
+
+              <div class="focus-stats">
+                <div class="focus-stat">
+                  <span class="material-icons" style="color: var(--accent-green);">timer</span>
+                  <div>
+                    <div style="font-size: 20px; font-weight: 700; color: var(--text-primary);">
+                      ${Math.floor(progress)}%
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">Progresso</div>
+                  </div>
+                </div>
+                <div class="focus-stat">
+                  <span class="material-icons" style="color: var(--accent-blue);">flag</span>
+                  <div>
+                    <div style="font-size: 20px; font-weight: 700; color: var(--text-primary);">
+                      ${Math.floor((1500 - appState.focus.remainingSeconds) / 60)}
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">Minutos</div>
+                  </div>
+                </div>
+                <div class="focus-stat">
+                  <span class="material-icons" style="color: var(--accent-orange);">schedule</span>
+                  <div>
+                    <div style="font-size: 20px; font-weight: 700; color: var(--text-primary);">
+                      ${Math.floor(appState.focus.remainingSeconds / 60)}
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">Restantes</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="focus-tips">
+              <h3 style="margin-bottom: 12px; color: var(--text-primary);">
+                <span class="material-icons" style="vertical-align: middle;">lightbulb</span>
+                Dicas para Foco Total
+              </h3>
+              <ul style="list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px;">
+                <li style="display: flex; gap: 8px; color: var(--text-secondary);">
+                  <span class="material-icons" style="font-size: 18px; color: var(--accent-blue);">check_circle</span>
+                  Elimine todas as distrações
+                </li>
+                <li style="display: flex; gap: 8px; color: var(--text-secondary);">
+                  <span class="material-icons" style="font-size: 18px; color: var(--accent-blue);">check_circle</span>
+                  Silencie notificações do celular
+                </li>
+                <li style="display: flex; gap: 8px; color: var(--text-secondary);">
+                  <span class="material-icons" style="font-size: 18px; color: var(--accent-blue);">check_circle</span>
+                  Foque em uma tarefa por vez
+                </li>
+                <li style="display: flex; gap: 8px; color: var(--text-secondary);">
+                  <span class="material-icons" style="font-size: 18px; color: var(--accent-blue);">check_circle</span>
+                  Faça uma pausa após o ciclo
+                </li>
+              </ul>
             </div>
           </div>
         </div>
@@ -1178,8 +1348,16 @@
     renderKanban: function(container) {
       container.innerHTML = `
         <div>
-          <h1>Kanban</h1>
-          <p style="color: var(--text-secondary); margin-bottom: 24px;">Visualização em kanban das suas tarefas</p>
+          <div class="page-header">
+            <div class="page-title">
+              <h1>Kanban</h1>
+              <span>Arraste e solte para organizar suas tarefas</span>
+            </div>
+            <button class="btn btn-primary" onclick="taskHandlers.openCreateModal()">
+              <span class="material-icons">add</span>
+              Nova Tarefa
+            </button>
+          </div>
           <div id="kanban-board"></div>
         </div>
       `;
@@ -1192,48 +1370,254 @@
       const tasks = appState.tasks;
 
       const columns = [
-        { id: 'todo', title: '📋 A Fazer', tasks: tasks.filter(t => t.status === 'todo') },
-        { id: 'doing', title: '⚡ Em Andamento', tasks: tasks.filter(t => t.status === 'doing') },
-        { id: 'done', title: '✅ Concluído', tasks: tasks.filter(t => t.status === 'done') }
+        { id: 'todo', title: '📋 A Fazer', color: 'var(--accent-blue)', tasks: tasks.filter(t => t.status === 'todo') },
+        { id: 'doing', title: '⚡ Em Andamento', color: 'var(--accent-orange)', tasks: tasks.filter(t => t.status === 'doing') },
+        { id: 'done', title: '✅ Concluído', color: 'var(--accent-green)', tasks: tasks.filter(t => t.status === 'done') }
       ];
 
       container.innerHTML = `
         <div class="kanban-board">
           ${columns.map(col => `
-            <div class="kanban-column">
-              <div class="kanban-header">
+            <div class="kanban-column" data-status="${col.id}">
+              <div class="kanban-header" style="border-left: 4px solid ${col.color};">
                 <span>${col.title}</span>
                 <span class="kanban-count">${col.tasks.length}</span>
               </div>
-              <div class="kanban-cards">
-                ${col.tasks.length === 0 ? '<p style="color: var(--text-tertiary); text-align: center; padding: 20px;">Nenhuma tarefa</p>' : ''}
-                ${col.tasks.map(task => `
-                  <div class="kanban-card">
-                    <div class="kanban-card-title">${utils.sanitize(task.title)}</div>
-                    <p style="font-size: 12px; color: var(--text-secondary); margin: 6px 0;">
-                      ${utils.sanitize(task.description || '')}
-                    </p>
-                  </div>
-                `).join('')}
+              <div class="kanban-cards" data-column="${col.id}">
+                ${col.tasks.length === 0 ? '<div class="kanban-empty">Arraste tarefas aqui</div>' : ''}
+                ${col.tasks.map(task => {
+                  const priorityColors = { high: 'var(--accent-red)', medium: 'var(--accent-orange)', low: 'var(--accent-blue)' };
+                  return `
+                    <div class="kanban-card" draggable="true" data-task-id="${task.id}">
+                      <div class="kanban-card-header">
+                        <div class="kanban-card-title">${utils.sanitize(task.title)}</div>
+                        <span class="kanban-card-menu" onclick="taskHandlers.openEditModal('${task.id}')">
+                          <span class="material-icons" style="font-size: 18px;">more_vert</span>
+                        </span>
+                      </div>
+                      ${task.description ? `
+                        <p class="kanban-card-description">${utils.sanitize(task.description)}</p>
+                      ` : ''}
+                      <div class="kanban-card-footer">
+                        ${task.priority ? `
+                          <span class="kanban-card-priority" style="background: ${priorityColors[task.priority]}20; color: ${priorityColors[task.priority]};">
+                            ${task.priority}
+                          </span>
+                        ` : ''}
+                        ${task.dueDate ? `
+                          <span class="kanban-card-due">
+                            <span class="material-icons" style="font-size: 14px;">event</span>
+                            ${utils.formatRelativeDate(task.dueDate)}
+                          </span>
+                        ` : ''}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
               </div>
             </div>
           `).join('')}
         </div>
       `;
+
+      // Ativar drag and drop
+      this.initKanbanDragDrop();
+    },
+
+    initKanbanDragDrop: function() {
+      const cards = document.querySelectorAll('.kanban-card[draggable="true"]');
+      const columns = document.querySelectorAll('.kanban-cards');
+
+      let draggedElement = null;
+
+      cards.forEach(card => {
+        card.addEventListener('dragstart', (e) => {
+          draggedElement = card;
+          card.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/html', card.innerHTML);
+        });
+
+        card.addEventListener('dragend', (e) => {
+          card.classList.remove('dragging');
+          draggedElement = null;
+        });
+      });
+
+      columns.forEach(column => {
+        column.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          column.classList.add('drag-over');
+        });
+
+        column.addEventListener('dragleave', (e) => {
+          column.classList.remove('drag-over');
+        });
+
+        column.addEventListener('drop', async (e) => {
+          e.preventDefault();
+          column.classList.remove('drag-over');
+
+          if (!draggedElement) return;
+
+          const taskId = draggedElement.getAttribute('data-task-id');
+          const newStatus = column.getAttribute('data-column');
+          const currentCard = draggedElement;
+
+          // Optimistic update - mover visualmente primeiro
+          column.appendChild(draggedElement);
+
+          // Remover mensagem "Arraste tarefas aqui" se existir
+          const emptyMsg = column.querySelector('.kanban-empty');
+          if (emptyMsg) emptyMsg.remove();
+
+          // Atualizar no backend
+          const result = await api.setTaskStatus(taskId, newStatus);
+
+          if (result.ok) {
+            applyFullState(result.data);
+            toast.success('Tarefa movida!');
+
+            // Re-renderizar para atualizar contadores
+            setTimeout(() => this.renderKanbanBoard(), 500);
+          } else {
+            toast.error('Erro ao mover tarefa');
+            // Reverter o movimento visual se falhar
+            this.renderKanbanBoard();
+          }
+        });
+      });
     },
 
     renderCalendar: function(container) {
+      // Estado do calendário
+      if (!this.calendarState) {
+        const today = new Date();
+        this.calendarState = {
+          year: today.getFullYear(),
+          month: today.getMonth()
+        };
+      }
+
       container.innerHTML = `
         <div>
-          <h1>Calendário</h1>
-          <p style="color: var(--text-secondary); margin-bottom: 24px;">Visualize suas rotinas e tarefas no calendário</p>
+          <div class="page-header">
+            <div class="page-title">
+              <h1>Calendário</h1>
+              <span>Visualize suas rotinas e tarefas</span>
+            </div>
+            <div class="flex gap-sm">
+              <button class="btn btn-secondary" onclick="views.calendarPrevMonth()">
+                <span class="material-icons">chevron_left</span>
+              </button>
+              <button class="btn btn-primary" onclick="views.calendarToday()">Hoje</button>
+              <button class="btn btn-secondary" onclick="views.calendarNextMonth()">
+                <span class="material-icons">chevron_right</span>
+              </button>
+            </div>
+          </div>
+
           <div class="card">
-            <p style="text-align: center; padding: 40px; color: var(--text-secondary);">
-              Funcionalidade de calendário em desenvolvimento
-            </p>
+            <div id="calendar-view"></div>
           </div>
         </div>
       `;
+
+      this.renderCalendarView();
+    },
+
+    calendarPrevMonth: function() {
+      this.calendarState.month--;
+      if (this.calendarState.month < 0) {
+        this.calendarState.month = 11;
+        this.calendarState.year--;
+      }
+      this.renderCalendarView();
+    },
+
+    calendarNextMonth: function() {
+      this.calendarState.month++;
+      if (this.calendarState.month > 11) {
+        this.calendarState.month = 0;
+        this.calendarState.year++;
+      }
+      this.renderCalendarView();
+    },
+
+    calendarToday: function() {
+      const today = new Date();
+      this.calendarState.year = today.getFullYear();
+      this.calendarState.month = today.getMonth();
+      this.renderCalendarView();
+    },
+
+    renderCalendarView: function() {
+      const container = document.getElementById('calendar-view');
+      if (!container) return;
+
+      const { year, month } = this.calendarState;
+      const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+                          'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+      const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+      const firstDay = new Date(year, month, 1);
+      const lastDay = new Date(year, month + 1, 0);
+      const daysInMonth = lastDay.getDate();
+      const startingDayOfWeek = firstDay.getDay();
+
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+
+      // Criar grid de dias
+      let calendarHTML = `
+        <div style="margin-bottom: 24px;">
+          <h2 style="text-align: center; color: var(--text-primary); margin: 0;">
+            ${monthNames[month]} ${year}
+          </h2>
+        </div>
+        <div class="calendar-grid">
+          ${dayNames.map(day => `
+            <div class="calendar-day-name">${day}</div>
+          `).join('')}
+      `;
+
+      // Células vazias antes do primeiro dia
+      for (let i = 0; i < startingDayOfWeek; i++) {
+        calendarHTML += '<div class="calendar-day empty"></div>';
+      }
+
+      // Dias do mês
+      for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(year, month, day);
+        const dateStr = date.toISOString().split('T')[0];
+        const isToday = dateStr === todayStr;
+
+        // Buscar tarefas e rotinas deste dia
+        const dayTasks = appState.tasks.filter(t => t.dueDate === dateStr);
+        const dayHabits = appState.habits.filter(h => {
+          if (h.active === false) return false;
+          if (h.nextOccurrence) return h.nextOccurrence === dateStr;
+          return true;
+        });
+
+        const totalItems = dayTasks.length + dayHabits.length;
+
+        calendarHTML += `
+          <div class="calendar-day ${isToday ? 'today' : ''}" onclick="calendarHandlers.openDay('${dateStr}')">
+            <div class="calendar-day-number">${day}</div>
+            ${totalItems > 0 ? `
+              <div class="calendar-day-dots">
+                ${dayTasks.length > 0 ? `<span class="calendar-dot task" title="${dayTasks.length} tarefa(s)"></span>` : ''}
+                ${dayHabits.length > 0 ? `<span class="calendar-dot habit" title="${dayHabits.length} rotina(s)"></span>` : ''}
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }
+
+      calendarHTML += '</div>';
+      container.innerHTML = calendarHTML;
     },
 
     renderGoals: function(container) {
@@ -1270,7 +1654,7 @@
       }
 
       container.innerHTML = `<div class="grid">${goals.map(goal => {
-        const progress = ((goal.currentValue || 0) / goal.targetValue) * 100;
+        const progress = goal.targetValue > 0 ? ((goal.currentValue || 0) / goal.targetValue) * 100 : 0;
         const isComplete = progress >= 100;
 
         return `
@@ -1858,10 +2242,11 @@
       const repeatInterval = parseInt(document.getElementById('task-repeat-interval').value, 10) || 1;
       const category = document.getElementById('task-category').value.trim();
 
-      if (!title) {
-        toast.error('Por favor, preencha o titulo da tarefa');
-        return;
-      }
+      // Validações robustas
+      if (!utils.validateRequired(title, 'Título da tarefa')) return;
+      if (dueDate && !utils.validateDate(dueDate, 'Data de vencimento', false)) return;
+      if (dueTime && !utils.validateTime(dueTime, 'Hora de vencimento')) return;
+      if (repeatType && !utils.validateNumber(repeatInterval, 'Intervalo de repetição', 1, 365)) return;
 
       const modalActions = document.querySelectorAll('.modal-footer button');
       modalActions.forEach(btn => btn.disabled = true);
@@ -2148,13 +2533,15 @@
       const timezone = document.getElementById('goal-timezone').value;
       const category = document.getElementById('goal-category').value;
 
-      if (!title) {
-        toast.error('Por favor, preencha o nome da meta');
-        return;
-      }
+      // Validações robustas
+      if (!utils.validateRequired(title, 'Nome da meta')) return;
+      if (!utils.validateNumber(targetValue, 'Valor alvo', 1, 1000000000)) return;
+      if (!utils.validateNumber(currentValue, 'Valor atual', 0, 1000000000)) return;
+      if (deadline && !utils.validateDate(deadline, 'Data limite', false)) return;
+      if (deadlineTime && !utils.validateTime(deadlineTime, 'Hora limite')) return;
 
-      if (!targetValue || targetValue <= 0) {
-        toast.error('Por favor, defina um valor alvo valido');
+      if (currentValue > targetValue) {
+        toast.error('O valor atual não pode ser maior que o valor alvo');
         return;
       }
 
@@ -2411,6 +2798,93 @@
       date.setDate(date.getDate() - 1);
       this.state.date = date.toISOString().split('T')[0];
       refreshUI();
+    }
+  };
+
+  const calendarHandlers = {
+    openDay: function(dateStr) {
+      const date = new Date(dateStr);
+      const dayTasks = appState.tasks.filter(t => t.dueDate === dateStr);
+      const dayHabits = appState.habits.filter(h => {
+        if (h.active === false) return false;
+        if (h.nextOccurrence) return h.nextOccurrence === dateStr;
+        return true;
+      });
+
+      const content = `
+        <div style="max-height: 60vh; overflow-y: auto;">
+          <div style="margin-bottom: 24px;">
+            <h3 style="color: var(--text-primary); margin-bottom: 8px;">${utils.formatRelativeDate(dateStr)}</h3>
+            <p style="color: var(--text-secondary); font-size: 14px;">${date.toLocaleDateString('pt-BR', { weekday: 'long' })}</p>
+          </div>
+
+          ${dayHabits.length > 0 ? `
+            <div style="margin-bottom: 24px;">
+              <h4 style="color: var(--text-primary); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                <span class="material-icons" style="font-size: 20px;">check_circle</span>
+                Rotinas (${dayHabits.length})
+              </h4>
+              <div style="display: flex; flex-direction: column; gap: 8px;">
+                ${dayHabits.map(habit => {
+                  const log = appState.habitLogs.find(l => l.habitId === habit.id && l.date === dateStr);
+                  const completed = log?.completed || false;
+                  return `
+                    <div style="padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius-md); display: flex; justify-content: space-between; align-items: center;">
+                      <div>
+                        <div style="font-weight: 500; color: var(--text-primary);">${utils.sanitize(habit.name)}</div>
+                        ${habit.scheduledTime ? `<div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">${utils.formatTime(habit.scheduledTime)}</div>` : ''}
+                      </div>
+                      <span class="material-icons" style="color: ${completed ? 'var(--accent-green)' : 'var(--text-tertiary)'};">
+                        ${completed ? 'check_circle' : 'radio_button_unchecked'}
+                      </span>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          ` : ''}
+
+          ${dayTasks.length > 0 ? `
+            <div>
+              <h4 style="color: var(--text-primary); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                <span class="material-icons" style="font-size: 20px;">task_alt</span>
+                Tarefas (${dayTasks.length})
+              </h4>
+              <div style="display: flex; flex-direction: column; gap: 8px;">
+                ${dayTasks.map(task => {
+                  const priorityColors = { high: 'var(--accent-red)', medium: 'var(--accent-orange)', low: 'var(--accent-blue)' };
+                  const statusLabels = { todo: 'A fazer', doing: 'Em andamento', done: 'Concluído' };
+                  return `
+                    <div style="padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius-md);">
+                      <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+                        <div style="font-weight: 500; color: var(--text-primary);">${utils.sanitize(task.title)}</div>
+                        <span class="badge" style="background: ${priorityColors[task.priority] || 'var(--accent-blue)'}20; color: ${priorityColors[task.priority] || 'var(--accent-blue)'}; font-size: 11px; padding: 2px 8px;">
+                          ${task.priority || 'medium'}
+                        </span>
+                      </div>
+                      <div style="font-size: 12px; color: var(--text-secondary);">
+                        ${statusLabels[task.status] || task.status}
+                        ${task.dueTime ? ` • ${utils.formatTime(task.dueTime)}` : ''}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          ` : ''}
+
+          ${dayHabits.length === 0 && dayTasks.length === 0 ? `
+            <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+              <span class="material-icons" style="font-size: 48px; opacity: 0.3; margin-bottom: 16px; display: block;">event_available</span>
+              <p>Nenhuma atividade planejada para este dia</p>
+            </div>
+          ` : ''}
+        </div>
+      `;
+
+      modal.open(`Detalhes do Dia`, content, [
+        { label: 'Fechar', onclick: 'modal.close()', primary: false }
+      ]);
     }
   };
 
