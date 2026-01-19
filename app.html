@@ -103,8 +103,24 @@
     perfCache.invalidate();
   }
 
+  // Debounce para refreshUI
+  let refreshTimeout = null;
   function refreshUI() {
-    router.render(appState.currentView);
+    // Invalidar cache de performance
+    perfCache.invalidate();
+
+    // Debounce para evitar múltiplas renderizações
+    if (refreshTimeout) {
+      clearTimeout(refreshTimeout);
+    }
+
+    refreshTimeout = setTimeout(() => {
+      // Forçar re-renderização da view atual
+      requestAnimationFrame(() => {
+        router.render(appState.currentView);
+      });
+      refreshTimeout = null;
+    }, 50);
   }
 
   // ============================================
@@ -245,6 +261,30 @@
   };
 
   // ============================================
+  // GLOBAL LOADING STATE
+  // ============================================
+
+  const globalLoading = {
+    activeOps: 0,
+
+    start: function() {
+      this.activeOps++;
+      appState.isLoading = true;
+    },
+
+    end: function() {
+      this.activeOps = Math.max(0, this.activeOps - 1);
+      if (this.activeOps === 0) {
+        appState.isLoading = false;
+      }
+    },
+
+    isActive: function() {
+      return this.activeOps > 0;
+    }
+  };
+
+  // ============================================
   // TOAST NOTIFICATIONS
   // ============================================
 
@@ -348,10 +388,13 @@
 
   const api = {
     call: function(functionName, ...args) {
+      globalLoading.start();
+
       return new Promise((resolve) => {
         try {
           if (typeof google === 'undefined' || !google.script || !google.script.run) {
             console.error('google.script.run não está disponível');
+            globalLoading.end();
             resolve({ ok: false, error: 'Ambiente de execução não disponível' });
             return;
           }
@@ -359,12 +402,14 @@
           // Timeout de 15 segundos
           const timeoutId = setTimeout(() => {
             console.error('Timeout na chamada:', functionName);
+            globalLoading.end();
             resolve({ ok: false, error: 'A operação demorou muito tempo. Tente novamente.' });
           }, 15000);
 
           google.script.run
             .withSuccessHandler((result) => {
               clearTimeout(timeoutId);
+              globalLoading.end();
               if (result === null || result === undefined) {
                 resolve({ ok: false, error: 'O servidor retornou uma resposta vazia. Verifique as configurações e tente novamente.' });
               } else {
@@ -373,6 +418,7 @@
             })
             .withFailureHandler((error) => {
               clearTimeout(timeoutId);
+              globalLoading.end();
               console.error('Erro na chamada API:', error);
               const errorMsg = error.message || error.toString();
               resolve({ ok: false, error: errorMsg });
@@ -380,6 +426,7 @@
             [functionName](...args);
         } catch (error) {
           console.error('Erro ao chamar API:', error);
+          globalLoading.end();
           resolve({ ok: false, error: error.message || 'Erro desconhecido' });
         }
       });
@@ -392,31 +439,60 @@
     createHabit: async function(habitData) {
       return await this.call('createHabit', appState.userKey, habitData);
     },
-    
+
     updateHabit: async function(habitId, updates) {
       return await this.call('updateHabit', appState.userKey, habitId, updates);
     },
-    
+
     deleteHabit: async function(habitId) {
-      if (!confirm('Tem certeza que deseja excluir esta rotina? Esta a��o n�o pode ser desfeita.')) {
-        return;
-      }
+      return await this.call('deleteHabit', appState.userKey, habitId);
+    },
 
-      const modalActions = document.querySelectorAll('.modal-footer button');
-      modalActions.forEach(btn => btn.disabled = true);
+    // Tasks API
+    createTask: async function(taskData) {
+      return await this.call('createTask', appState.userKey, taskData);
+    },
 
-      const result = await api.deleteHabit(habitId);
+    updateTask: async function(taskId, updates) {
+      return await this.call('updateTask', appState.userKey, taskId, updates);
+    },
 
-      modalActions.forEach(btn => btn.disabled = false);
+    deleteTask: async function(taskId) {
+      return await this.call('deleteTask', appState.userKey, taskId);
+    },
 
-      if (result.ok) {
-        applyFullState(result.data);
-        modal.close();
-        refreshUI();
-        toast.success('Rotina exclu�da!');
-      } else {
-        toast.error('Erro ao excluir rotina: ' + result.error);
-      }
+    toggleTaskStatus: async function(taskId) {
+      return await this.call('toggleTaskStatus', appState.userKey, taskId);
+    },
+
+    setTaskStatus: async function(taskId, status) {
+      return await this.call('setTaskStatus', appState.userKey, taskId, status);
+    },
+
+    // Goals API
+    createGoal: async function(goalData) {
+      return await this.call('createGoal', appState.userKey, goalData);
+    },
+
+    updateGoal: async function(goalId, updates) {
+      return await this.call('updateGoal', appState.userKey, goalId, updates);
+    },
+
+    deleteGoal: async function(goalId) {
+      return await this.call('deleteGoal', appState.userKey, goalId);
+    },
+
+    updateGoalProgress: async function(goalId, newValue) {
+      return await this.call('updateGoalProgress', appState.userKey, goalId, newValue);
+    },
+
+    // Habit Logs API
+    logHabit: async function(habitId, date, completed) {
+      return await this.call('logHabit', appState.userKey, habitId, date, completed);
+    },
+
+    toggleHabitCompletion: async function(habitId, date) {
+      return await this.call('toggleHabitCompletion', appState.userKey, habitId, date);
     }
   };
 
@@ -1364,13 +1440,39 @@
   const habitHandlers = {
     toggleToday: async function(habitId) {
       const today = utils.getTodayISO();
+
+      // Optimistic update
+      const log = appState.habitLogs.find(l => l.habitId === habitId && l.date === today);
+      const previousCompleted = log?.completed || false;
+
+      // Atualizar UI imediatamente
+      if (log) {
+        log.completed = !log.completed;
+      } else {
+        appState.habitLogs.push({
+          habitId: habitId,
+          date: today,
+          completed: true,
+          createdAt: new Date().toISOString()
+        });
+      }
+      refreshUI();
+
+      // Fazer chamada ao backend
       const result = await api.toggleHabitCompletion(habitId, today);
 
       if (result.ok) {
         applyFullState(result.data);
         refreshUI();
-        toast.success('Rotina atualizada!');
       } else {
+        // Reverter se falhar
+        if (log) {
+          log.completed = previousCompleted;
+        } else {
+          const index = appState.habitLogs.findIndex(l => l.habitId === habitId && l.date === today);
+          if (index > -1) appState.habitLogs.splice(index, 1);
+        }
+        refreshUI();
         toast.error('Erro ao atualizar rotina: ' + result.error);
       }
     },
@@ -1472,6 +1574,12 @@
 
       const modalActions = document.querySelectorAll('.modal-footer button');
       modalActions.forEach(btn => btn.disabled = true);
+      const primaryBtn = document.querySelector('.modal-footer .btn-primary');
+      const primaryLabel = primaryBtn ? primaryBtn.textContent : '';
+      if (primaryBtn) {
+        primaryBtn.innerHTML = '<span class="material-icons rotating">sync</span> Criando...';
+      }
+      toast.info('Criando rotina...');
 
       const habitData = {
         name,
@@ -1490,6 +1598,9 @@
       const result = await api.createHabit(habitData);
 
       modalActions.forEach(btn => btn.disabled = false);
+      if (primaryBtn) {
+        primaryBtn.textContent = primaryLabel;
+      }
 
       if (result.ok) {
         applyFullState(result.data);
@@ -2049,6 +2160,12 @@
 
       const modalActions = document.querySelectorAll('.modal-footer button');
       modalActions.forEach(btn => btn.disabled = true);
+      const primaryBtn = document.querySelector('.modal-footer .btn-primary');
+      const primaryLabel = primaryBtn ? primaryBtn.textContent : '';
+      if (primaryBtn) {
+        primaryBtn.innerHTML = '<span class="material-icons rotating">sync</span> Criando...';
+      }
+      toast.info('Criando meta...');
 
       const goalData = {
         title,
@@ -2066,6 +2183,9 @@
       const result = await api.createGoal(goalData);
 
       modalActions.forEach(btn => btn.disabled = false);
+      if (primaryBtn) {
+        primaryBtn.textContent = primaryLabel;
+      }
 
       if (result.ok) {
         applyFullState(result.data);
