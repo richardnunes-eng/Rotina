@@ -61,6 +61,33 @@
     }
   };
 
+  // Cache de performance para otimizar c√°lculos pesados
+  const perfCache = {
+    streaks: new Map(),
+    heatmapData: null,
+    filteredHabits: null,
+    filteredTasks: null,
+    lastCacheTime: Date.now(),
+
+    invalidate: function() {
+      this.streaks.clear();
+      this.heatmapData = null;
+      this.filteredHabits = null;
+      this.filteredTasks = null;
+      this.lastCacheTime = Date.now();
+    },
+
+    getStreak: function(habitId, logs) {
+      const cacheKey = `${habitId}_${logs.length}`;
+      if (this.streaks.has(cacheKey)) {
+        return this.streaks.get(cacheKey);
+      }
+      const streak = utils.calculateStreak(logs, habitId);
+      this.streaks.set(cacheKey, streak);
+      return streak;
+    }
+  };
+
   function applyFullState(nextState) {
     if (!nextState) return;
     appState.userKey = nextState.userKey || appState.userKey;
@@ -71,6 +98,9 @@
     appState.goals = Array.isArray(nextState.goals) ? nextState.goals : [];
     appState.goalLogs = Array.isArray(nextState.goalLogs) ? nextState.goalLogs : [];
     appState.journals = Array.isArray(nextState.journals) ? nextState.journals : [];
+
+    // Invalidar cache quando os dados mudarem
+    perfCache.invalidate();
   }
 
   function refreshUI() {
@@ -326,11 +356,11 @@
             return;
           }
 
-          // Timeout de 60 segundos
+          // Timeout de 15 segundos
           const timeoutId = setTimeout(() => {
             console.error('Timeout na chamada:', functionName);
             resolve({ ok: false, error: 'A opera√ß√£o demorou muito tempo. Tente novamente.' });
-          }, 60000);
+          }, 15000);
 
           google.script.run
             .withSuccessHandler((result) => {
@@ -368,7 +398,7 @@
     },
     
     deleteHabit: async function(habitId) {
-      if (!confirm('Tem certeza que deseja excluir esta rotina? Esta aÁ„o n„o pode ser desfeita.')) {
+      if (!confirm('Tem certeza que deseja excluir esta rotina? Esta aÔøΩÔøΩo nÔøΩo pode ser desfeita.')) {
         return;
       }
 
@@ -383,7 +413,7 @@
         applyFullState(result.data);
         modal.close();
         refreshUI();
-        toast.success('Rotina excluÌda!');
+        toast.success('Rotina excluÔøΩda!');
       } else {
         toast.error('Erro ao excluir rotina: ' + result.error);
       }
@@ -503,16 +533,44 @@
   const views = {
     renderDashboard: function(container) {
       const today = utils.getTodayISO();
-      const completedHabitsToday = appState.habitLogs.filter(log =>
-        log.date === currentDate && log.completed
-      ).length;
-      const totalHabits = appState.habits.filter(h => h.active !== false).length;
-      const activeTasks = appState.tasks.filter(t => t.status !== 'done').length;
-      const dueToday = appState.tasks.filter(t => t.duedate === currentDate).length;
-      const overdue = appState.tasks.filter(t => t.dueDate && t.dueDate < today && t.status !== 'done').length;
+
+      // Otimizar: fazer todas as contagens em uma √∫nica passagem
+      let completedHabitsToday = 0;
+      let totalHabits = 0;
+      let activeTasks = 0;
+      let dueToday = 0;
+      let overdue = 0;
+      let currentStreak = 0;
+
+      // Processar h√°bitos
+      appState.habits.forEach(h => {
+        if (h.active !== false) {
+          totalHabits++;
+          const streak = perfCache.getStreak(h.id, appState.habitLogs);
+          currentStreak = Math.max(currentStreak, streak.current);
+        }
+      });
+
+      // Processar logs de hoje
+      appState.habitLogs.forEach(log => {
+        if (log.date === today && log.completed) {
+          completedHabitsToday++;
+        }
+      });
+
+      // Processar tarefas
+      appState.tasks.forEach(t => {
+        if (t.status !== 'done') {
+          activeTasks++;
+          if (t.dueDate && t.dueDate < today) {
+            overdue++;
+          } else if (t.dueDate === today) {
+            dueToday++;
+          }
+        }
+      });
+
       const agendaItems = this.getAgendaItems(today);
-      const streaks = appState.habits.map(h => utils.calculateStreak(appState.habitLogs, h.id).current);
-      const currentStreak = streaks.length ? Math.max(...streaks) : 0;
 
       container.innerHTML = `
         <div>
@@ -606,7 +664,12 @@
               <h2 class="card-title">Heatmap de habitos</h2>
               <span class="chip">Ultimos 90 dias</span>
             </div>
-            ${this.renderHeatmap()}
+            <div id="dashboard-heatmap">
+              <div style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                <span class="material-icons" style="font-size: 32px; opacity: 0.5;">hourglass_empty</span>
+                <p style="margin-top: 8px;">Carregando heatmap...</p>
+              </div>
+            </div>
           </div>
 
           <div class="card mt-lg">
@@ -614,7 +677,11 @@
               <h2 class="card-title">Rotinas de hoje</h2>
               <a href="#habits" class="btn btn-sm btn-primary">Ver todas</a>
             </div>
-            <div id="dashboard-habits-list"></div>
+            <div id="dashboard-habits-list">
+              <div style="padding: 20px; text-align: center; color: var(--text-secondary);">
+                <span class="material-icons rotating">sync</span>
+              </div>
+            </div>
           </div>
 
           <div class="card mt-md">
@@ -622,13 +689,40 @@
               <h2 class="card-title">Tarefas recentes</h2>
               <a href="#tasks" class="btn btn-sm btn-primary">Ver todas</a>
             </div>
-            <div id="dashboard-tasks-list"></div>
+            <div id="dashboard-tasks-list">
+              <div style="padding: 20px; text-align: center; color: var(--text-secondary);">
+                <span class="material-icons rotating">sync</span>
+              </div>
+            </div>
           </div>
         </div>
       `;
 
-      this.renderDashboardHabits();
-      this.renderDashboardTasks();
+      // Renderizar de forma ass√≠ncrona para n√£o bloquear a UI
+      requestAnimationFrame(() => {
+        this.renderDashboardHabits();
+      });
+
+      requestAnimationFrame(() => {
+        this.renderDashboardTasks();
+      });
+
+      // Lazy load do heatmap usando Intersection Observer
+      const heatmapContainer = document.getElementById('dashboard-heatmap');
+      if (heatmapContainer) {
+        const observer = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              setTimeout(() => {
+                heatmapContainer.innerHTML = this.renderHeatmap();
+              }, 50);
+              observer.disconnect();
+            }
+          });
+        }, { rootMargin: '100px' });
+
+        observer.observe(heatmapContainer);
+      }
     },
 
     renderDashboardHabits: function() {
@@ -805,18 +899,36 @@
     },
 
     renderHeatmap: function() {
+      // Usar cache para evitar recalcular o heatmap
+      if (perfCache.heatmapData) {
+        return perfCache.heatmapData;
+      }
+
       const days = 90;
       const today = new Date();
+
+      // Otimizar: criar um Map de logs por data
+      const logsByDate = new Map();
+      appState.habitLogs.forEach(log => {
+        if (log.completed) {
+          const count = logsByDate.get(log.date) || 0;
+          logsByDate.set(log.date, count + 1);
+        }
+      });
+
       const cells = [];
       for (let i = days - 1; i >= 0; i--) {
         const date = new Date(today);
         date.setDate(date.getDate() - i);
         const iso = date.toISOString().split('T')[0];
-        const count = appState.habitLogs.filter(log => log.date === iso && log.completed).length;
+        const count = logsByDate.get(iso) || 0;
         const level = count >= 4 ? 4 : count >= 3 ? 3 : count >= 2 ? 2 : count >= 1 ? 1 : 0;
-        cells.push(`<div class="heatmap-cell" data-level="${level}" title="${iso}"></div>`);
+        cells.push(`<div class="heatmap-cell" data-level="${level}" title="${iso}: ${count} rotinas"></div>`);
       }
-      return `<div class="heatmap">${cells.join('')}</div>`;
+
+      const html = `<div class="heatmap">${cells.join('')}</div>`;
+      perfCache.heatmapData = html;
+      return html;
     },
 
     renderHabits: function(container) {
@@ -856,8 +968,8 @@
       container.innerHTML = `<div class="grid">${habits.map(habit => {
         const log = appState.habitLogs.find(l => l.habitId === habit.id && l.date === currentDate);
         const completed = log?.completed || false;
-        const streak = utils.calculateStreak(appState.habitLogs, habit.id);
-        const scheduleLabel = [habit.scheduledTime, habit.timeWindow].filter(Boolean).join(' ï ');
+        const streak = perfCache.getStreak(habit.id, appState.habitLogs);
+        const scheduleLabel = [habit.scheduledTime, habit.timeWindow].filter(Boolean).join(' ÔøΩ ');
 
         return `
           <div class="card ${completed ? 'glow-green' : ''}">
@@ -877,11 +989,11 @@
             <div class="flex gap-md">
               <div style="flex: 1;">
                 <small style="color: var(--text-tertiary);">Sequencia atual</small>
-                <div style="font-size: 24px; font-weight: 700; color: var(--accent-blue);"> dias</div>
+                <div style="font-size: 24px; font-weight: 700; color: var(--accent-blue);">${streak.current} dias</div>
               </div>
               <div style="flex: 1;">
                 <small style="color: var(--text-tertiary);">Melhor sequencia</small>
-                <div style="font-size: 24px; font-weight: 700; color: var(--accent-purple);"> dias</div>
+                <div style="font-size: 24px; font-weight: 700; color: var(--accent-purple);">${streak.max} dias</div>
               </div>
             </div>
           </div>
@@ -1507,7 +1619,7 @@
     },
 
     deleteHabit: async function(habitId) {
-      if (!confirm('Tem certeza que deseja excluir esta rotina? Esta aÁ„o n„o pode ser desfeita.')) {
+      if (!confirm('Tem certeza que deseja excluir esta rotina? Esta aÔøΩÔøΩo nÔøΩo pode ser desfeita.')) {
         return;
       }
 
@@ -1522,7 +1634,7 @@
         applyFullState(result.data);
         modal.close();
         refreshUI();
-        toast.success('Rotina excluÌda!');
+        toast.success('Rotina excluÔøΩda!');
       } else {
         toast.error('Erro ao excluir rotina: ' + result.error);
       }
@@ -1822,7 +1934,7 @@
     },
 
     deleteTask: async function(taskId) {
-      if (!confirm('Tem certeza que deseja excluir esta tarefa? Esta aÁ„o n„o pode ser desfeita.')) {
+      if (!confirm('Tem certeza que deseja excluir esta tarefa? Esta aÔøΩÔøΩo nÔøΩo pode ser desfeita.')) {
         return;
       }
 
@@ -1837,7 +1949,7 @@
         applyFullState(result.data);
         modal.close();
         refreshUI();
-        toast.success('Tarefa excluÌda!');
+        toast.success('Tarefa excluÔøΩda!');
       } else {
         toast.error('Erro ao excluir tarefa: ' + result.error);
       }
@@ -2122,7 +2234,7 @@
     },
 
     deleteGoal: async function(goalId) {
-      if (!confirm('Tem certeza que deseja excluir esta meta? Esta aÁ„o n„o pode ser desfeita.')) {
+      if (!confirm('Tem certeza que deseja excluir esta meta? Esta aÔøΩÔøΩo nÔøΩo pode ser desfeita.')) {
         return;
       }
 
@@ -2137,7 +2249,7 @@
         applyFullState(result.data);
         modal.close();
         refreshUI();
-        toast.success('Meta excluÌda!');
+        toast.success('Meta excluÔøΩda!');
       } else {
         toast.error('Erro ao excluir meta: ' + result.error);
       }
@@ -2767,21 +2879,33 @@
     const loadingScreen = document.getElementById('loading-screen');
     const appContainer = document.getElementById('app');
 
-    const maxRetries = 3;
+    // Atualizar mensagem de loading
+    const updateLoadingMessage = (msg) => {
+      const loadingText = loadingScreen?.querySelector('p');
+      if (loadingText) loadingText.textContent = msg;
+    };
+
+    const maxRetries = 2;
     let attempt = 0;
 
     while (attempt < maxRetries) {
       try {
         attempt++;
         if (attempt > 1) {
+          updateLoadingMessage(`Tentativa ${attempt}/${maxRetries}...`);
           console.log(`Tentativa ${attempt}/${maxRetries} de inicializar o app...`);
+        } else {
+          updateLoadingMessage('Conectando ao servidor...');
         }
 
         const result = await api.initApp();
 
         if (result.ok) {
+          updateLoadingMessage('Carregando dados...');
           applyFullState(result.data);
           storage.save('appCache', appState);
+
+          updateLoadingMessage('Preparando interface...');
 
           // Atualizar email do usu√°rio na sidebar
           const userEmailElement = document.getElementById('user-email');
@@ -2789,21 +2913,30 @@
             userEmailElement.textContent = result.data.userKey || 'Usu√°rio';
           }
 
-          if (appContainer) {
-            appContainer.style.display = '';
-          }
-          if (loadingScreen) {
-            loadingScreen.style.display = 'none';
-          }
+          // Usar requestAnimationFrame para suavizar a transi√ß√£o
+          requestAnimationFrame(() => {
+            if (appContainer) {
+              appContainer.style.display = '';
+            }
+            if (loadingScreen) {
+              loadingScreen.style.opacity = '0';
+              loadingScreen.style.transition = 'opacity 0.3s ease';
+              setTimeout(() => {
+                loadingScreen.style.display = 'none';
+              }, 300);
+            }
 
-          router.init();
-          toast.success('Bem-vindo ao THX Ops!');
+            router.init();
+            toast.success('Bem-vindo ao THX Ops!');
+          });
+
           return; // Sucesso, sair da fun√ß√£o
         } else {
           // Se houver erro e ainda h√° tentativas, esperar e tentar novamente
           if (attempt < maxRetries) {
-            console.warn(`Falha na tentativa ${attempt}, tentando novamente em 2 segundos...`);
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            updateLoadingMessage(`Reconectando em 1 segundo...`);
+            console.warn(`Falha na tentativa ${attempt}, tentando novamente em 1 segundo...`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
             continue;
           }
           // √öltima tentativa falhou, mostrar tela de erro
@@ -2812,7 +2945,8 @@
       } catch (error) {
         console.error(`Erro na tentativa ${attempt}:`, error);
         if (attempt < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          updateLoadingMessage(`Reconectando em 1 segundo...`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
           continue;
         }
         showErrorScreen('Erro ao inicializar aplica√ß√£o. Por favor, recarregue a p√°gina.');
