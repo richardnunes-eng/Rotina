@@ -680,7 +680,17 @@ function getAppStateSafe(userKey) {
   const state = getAppState(userKey);
   const sanitized = sanitizeForJSON(state);
   if (sanitized && sanitized.ok === false && sanitized.error) {
-    throw new Error(sanitized.error);
+    log('Erro ao serializar estado', sanitized.error);
+    return {
+      userKey: userKey,
+      habits: [],
+      habitLogs: [],
+      tasks: [],
+      taskChecklists: [],
+      goals: [],
+      goalLogs: [],
+      journals: []
+    };
   }
   return sanitized;
 }
@@ -815,7 +825,7 @@ function updateHabit(userKey, habitId, updates) {
   }
 }
 
-function deleteHabit(userKey, habitId) {(userKey, habitId) {
+function deleteHabit(userKey, habitId) {
   try {
     const habits = findRecords('HABITS', { id: habitId, userKey: userKey });
     if (habits.length === 0) {
@@ -978,7 +988,7 @@ function updateTask(userKey, taskId, updates) {
   }
 }
 
-function deleteTask(userKey, taskId) {(userKey, taskId) {
+function deleteTask(userKey, taskId) {
   try {
     const tasks = findRecords('TASKS', { id: taskId, userKey: userKey });
     if (tasks.length === 0) {
@@ -1133,7 +1143,7 @@ function updateGoal(userKey, goalId, updates) {
   }
 }
 
-function deleteGoal(userKey, goalId) {(userKey, goalId) {
+function deleteGoal(userKey, goalId) {
   try {
     const goals = findRecords('GOALS', { id: goalId, userKey: userKey });
     if (goals.length === 0) {
@@ -2339,6 +2349,10 @@ function removeClickUpTrigger() {
     return { ok: false, error: error.toString() };
   }
 }
+
+
+
+
 
 
 

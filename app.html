@@ -1709,7 +1709,7 @@
       }
     },
 
-    openEditModal': function(taskId) {
+    openEditModal: function(taskId) {
       const task = appState.tasks.find(t => t.id === taskId);
       if (!task) {
         toast.error('Tarefa nao encontrada');
@@ -1848,7 +1848,7 @@
       }
     },
 
-    deleteTask': async function(taskId) {
+    deleteTask: async function(taskId) {
       if (!confirm('Tem certeza que deseja excluir esta tarefa? Esta ação não pode ser desfeita.')) {
         return;
       }
@@ -1994,7 +1994,7 @@
       }
     },
 
-    openEditModal': function(goalId) {
+    openEditModal: function(goalId) {
       const goal = appState.goals.find(g => g.id === goalId);
       if (!goal) {
         toast.error('Meta nao encontrada');
@@ -2123,7 +2123,7 @@
       }
     },
 
-    addProgress': async function(goalId) {
+    addProgress: async function(goalId) {
       const deltaInput = document.getElementById('goal-progress-delta');
       const delta = parseInt(deltaInput.value);
 
@@ -2891,6 +2891,10 @@
 
 })();
 </script>
+
+
+
+
 
 
 
