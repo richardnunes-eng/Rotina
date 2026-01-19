@@ -17,6 +17,97 @@ function log(message, data) {
   Logger.log(logMsg + (data ? ': ' + JSON.stringify(data) : ''));
 }
 
+// Sanitiza valores para serem seguros em JSON (evita ciclos e tipos não serializáveis)
+function sanitizeForJSON(input) {
+  var seen = [];
+
+  function isPlainObject(obj) {
+    if (!obj || typeof obj !== 'object') return false;
+    var proto = Object.getPrototypeOf(obj);
+    return proto === Object.prototype || proto === null;
+  }
+
+  function asSerializable(value) {
+    var t = typeof value;
+
+    if (value === null || t === 'undefined') return null;
+    if (t === 'string' || t === 'number' || t === 'boolean') return value;
+
+    // Datas
+    if (value instanceof Date) {
+      var iso = value.toISOString ? value.toISOString() : String(value);
+      return iso;
+    }
+
+    // Erros
+    if (value instanceof Error) {
+      return { name: value.name || 'Error', message: String(value.message || value), stack: String(value.stack || '') };
+    }
+
+    // Regex
+    if (value instanceof RegExp) {
+      return String(value);
+    }
+
+    // Funções
+    if (t === 'function') return undefined;
+
+    // Evitar ciclos
+    if (typeof value === 'object') {
+      if (seen.indexOf(value) !== -1) {
+        return '[Circular]';
+      }
+      seen.push(value);
+
+      // Arrays
+      if (Array.isArray(value)) {
+        var arr = [];
+        for (var i = 0; i < value.length; i++) {
+          arr.push(asSerializable(value[i]));
+        }
+        return arr;
+      }
+
+      // Objetos simples
+      if (isPlainObject(value)) {
+        var out = {};
+        for (var key in value) {
+          if (Object.prototype.hasOwnProperty.call(value, key)) {
+            var v = asSerializable(value[key]);
+            if (v !== undefined) out[key] = v;
+          }
+        }
+        return out;
+      }
+
+      // Objetos de Apps Script e outros tipos complexos
+      try {
+        // Tentar extrair propriedades básicas conhecidas
+        var jsonLike = {};
+        for (var k in value) {
+          if (Object.prototype.hasOwnProperty.call(value, k)) {
+            var vv = asSerializable(value[k]);
+            if (vv !== undefined) jsonLike[k] = vv;
+          }
+        }
+        if (Object.keys(jsonLike).length > 0) return jsonLike;
+      } catch (e) {}
+
+      // Fallback para string
+      try { return String(value); } catch (e2) { return Object.prototype.toString.call(value); }
+    }
+
+    // Fallback final
+    try { return JSON.parse(JSON.stringify(value)); } catch (e3) { return String(value); }
+  }
+
+  try {
+    return asSerializable(input);
+  } catch (e) {
+    return { ok: false, error: 'sanitizeForJSON failed: ' + String(e && e.message ? e.message : e) };
+  }
+}
+
 function safeExecute(fnName, handler, context) {
   const startTime = new Date();
   context = context || {};
