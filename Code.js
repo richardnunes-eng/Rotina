@@ -11,10 +11,30 @@
 const DEBUG_MODE = true;
 
 function log(message, data) {
+  if (!DEBUG_MODE) return;
   const timestamp = new Date().toISOString();
   const logMsg = `[${timestamp}] ${message}`;
-  console.log(logMsg, data || '');
-  Logger.log(logMsg + (data ? ': ' + JSON.stringify(data) : ''));
+  try {
+    console.log(logMsg, data || '');
+  } catch (e) {
+    // ignore
+  }
+  try {
+    Logger.log(logMsg + (data ? ': ' + JSON.stringify(sanitizeForJSON(data)) : ''));
+  } catch (e2) {
+    Logger.log(logMsg);
+  }
+}
+
+function logError(fnName, error, context) {
+  if (!DEBUG_MODE) return;
+  const payload = {
+    fnName: fnName || 'unknown',
+    message: error && error.message ? error.message : String(error),
+    stack: error && error.stack ? String(error.stack) : '',
+    context: context || {}
+  };
+  log(`[${payload.fnName}] ERRO`, payload);
 }
 
 // Sanitiza valores para serem seguros em JSON (evita ciclos e tipos não serializáveis)
@@ -716,9 +736,11 @@ function generateRecurringTasks(userKey, options) {
   const daysAhead = options.daysAhead || 14;
 
   try {
+    log('[generateRecurringTasks] start', { userKey: userKey, daysAhead: daysAhead });
     const ss = getOrCreateSpreadsheet();
     const sheet = ss.getSheetByName('TASKS');
     if (!sheet || sheet.getLastRow() <= 1) {
+      log('[generateRecurringTasks] no data', { hasSheet: !!sheet, lastRow: sheet ? sheet.getLastRow() : 0 });
       return { ok: true, data: { generated: false } };
     }
 
@@ -806,7 +828,7 @@ function generateRecurringTasks(userKey, options) {
 
     return { ok: true, data: { generated: true } };
   } catch (error) {
-    log('Erro ao gerar tarefas recorrentes', error.toString());
+    logError('generateRecurringTasks', error, { userKey: userKey, options: options });
     return { ok: false, error: error.toString() };
   }
 }
@@ -823,7 +845,7 @@ function doGet() {
     userEmail = Session.getActiveUser().getEmail();
   } catch (e) {
     // Falha ao obter email - não autenticado
-    log('Erro ao obter email do usuário', e.toString());
+    logError('doGet:getActiveUserEmail', e, {});
   }
 
   // Se não houver email, significa que não está autenticado
@@ -932,8 +954,9 @@ function getAppStateSafe(userKey) {
 
 function initApp(providedUserKey) {
   return safeExecute('initApp', () => {
-    log('=== INIT APP COME��ANDO ===');
+    log('=== INIT APP COMEÇANDO ===');
     const userKey = providedUserKey || getUserKey();
+    log('[initApp] resolved userKey', { providedUserKey: providedUserKey, userKey: userKey });
 
     // Criar usuǭrio se nǜo existir
     const existingUser = findRecords('USERS', { userKey: userKey });
@@ -951,7 +974,7 @@ function initApp(providedUserKey) {
     try {
       generateRecurringTasks(userKey, { daysAhead: 14 });
     } catch (e) {
-      Logger.log('Erro ao gerar recorrǦncias: ' + e.toString());
+      logError('initApp:generateRecurringTasks', e, { userKey: userKey });
     }
 
     const response = {
